@@ -254,22 +254,34 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
 
     if (section === "completion") {
       const pages = completionPages(m);
-      const userTable = (users: CompletionUser[], total: number): PptxGenJS.TableRow[] => {
+      const cell = (text: string, opts: PptxGenJS.TableCellProps = {}): PptxGenJS.TableCell => ({
+        text,
+        options: { fontSize: 10, color: C.muted, ...opts },
+      });
+      const userTable = (
+        users: CompletionUser[],
+        total: number,
+        start: number,
+        wide: boolean,
+      ): PptxGenJS.TableRow[] => {
+        const head: PptxGenJS.TableRow = [
+          cell("#", { bold: true, color: C.ink }),
+          cell("Participant", { bold: true, color: C.ink }),
+          cell("Course", { bold: true, color: C.ink }),
+          ...(wide ? [cell("Department", { bold: true, color: C.ink })] : []),
+        ];
         if (users.length === 0 && total === 0) {
-          return [
-            [
-              { text: "0", options: { fontSize: 11, color: C.muted } },
-              { text: "", options: { fontSize: 11, color: C.muted } },
-            ],
-          ];
+          return [head, [cell(""), cell("0", { color: C.ink }), cell(""), ...(wide ? [cell("")] : [])]];
         }
-        return users.map((user) => [
-          { text: user.participant, options: { fontSize: 10, color: C.muted } },
-          {
-            text: user.course,
-            options: { fontSize: 10, align: "right" as const, color: C.muted },
-          },
-        ]);
+        return [
+          head,
+          ...users.map((user, i) => [
+            cell(String(start + i + 1)),
+            cell(user.participant, { color: C.ink }),
+            cell(user.course),
+            ...(wide ? [cell(user.department)] : []),
+          ]),
+        ];
       };
 
       pages.forEach((page, pageIndex) => {
@@ -286,95 +298,146 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
 
         let listTop = 1.45;
         if (page.showChart) {
-          (
-            [
-              ["Completed", m.completed],
-              ["Not completed", m.notCompleted],
-            ] as const
-          ).forEach((card, i) => {
-            const x = 0.5 + i * 2.15;
-            target.addShape("roundRect", {
-              x,
-              y: 1.5,
-              w: 2,
-              h: 1.15,
-              fill: { color: C.card },
-              line: { color: C.card },
-              rectRadius: 0.08,
-            });
-            target.addText(String(card[1]), {
-              x,
-              y: 1.58,
-              w: 2,
-              h: 0.62,
-              fontSize: 28,
+          const slices = m.completionSplit
+            .map((item, i) => ({ ...item, color: seriesColor(i) }))
+            .filter((item) => item.count > 0);
+          if (slices.length > 0) {
+            target.addChart(
+              pptx.ChartType.doughnut,
+              [
+                {
+                  name: "Completion",
+                  labels: slices.map((item) => item.label),
+                  values: slices.map((item) => item.count),
+                },
+              ],
+              {
+                ...chartBase,
+                x: 0.35,
+                y: 1.35,
+                w: 4.3,
+                h: 2.15,
+                holeSize: 62,
+                showLegend: false,
+                showValue: false,
+                showPercent: false,
+                chartColors: slices.map((item) => item.color),
+              } as PptxGenJS.IChartOpts,
+            );
+          } else {
+            target.addText("0", {
+              x: 0.35,
+              y: 1.9,
+              w: 4.3,
+              h: 0.8,
+              fontSize: 32,
               bold: true,
               align: "center",
               color: C.ink,
               fontFace: "Georgia",
             });
-            target.addText(card[0], {
-              x,
-              y: 2.18,
-              w: 2,
-              h: 0.32,
-              fontSize: 11,
-              align: "center",
+          }
+          m.completionSplit.forEach((item, i) => {
+            const y = 1.55 + i * 0.85;
+            target.addShape("roundRect", {
+              x: 4.7,
+              y,
+              w: 4.8,
+              h: 0.72,
+              fill: { color: C.card },
+              line: { color: C.card },
+              rectRadius: 0.08,
+            });
+            target.addShape("roundRect", {
+              x: 4.9,
+              y: y + 0.24,
+              w: 0.24,
+              h: 0.24,
+              fill: { color: seriesColor(i) },
+              line: { color: seriesColor(i) },
+              rectRadius: 0.04,
+            });
+            target.addText(item.label, {
+              x: 5.3,
+              y,
+              w: 2.2,
+              h: 0.72,
+              fontSize: 13,
+              color: C.ink,
+              valign: "middle",
+            });
+            target.addText(String(item.count), {
+              x: 7.4,
+              y,
+              w: 0.9,
+              h: 0.72,
+              fontSize: 18,
+              bold: true,
+              align: "right",
+              color: C.ink,
+              fontFace: "Georgia",
+              valign: "middle",
+            });
+            target.addText(`${item.pct}%`, {
+              x: 8.35,
+              y,
+              w: 0.95,
+              h: 0.72,
+              fontSize: 12,
+              align: "right",
               color: C.muted,
+              valign: "middle",
             });
           });
-          target.addChart(
-            pptx.ChartType.bar,
-            [
-              {
-                name: "Users",
-                labels: m.completionSplit.map((d) => d.label),
-                values: m.completionSplit.map((d) => d.count),
-              },
-            ],
-            {
-              ...chartBase,
-              x: 4.9,
-              y: 1.35,
-              w: 4.6,
-              h: 1.55,
-              barDir: "col",
-              chartColors: [seriesColor(0), seriesColor(1)],
-              showLegend: false,
-              showValue: true,
-              valAxisHidden: true,
-              catAxisLabelColor: C.muted,
-              varyColors: true,
-            } as PptxGenJS.IChartOpts,
-          );
-          listTop = 2.85;
+          listTop = 3.7;
         }
 
-        (
-          [
-            ["Completed users", m.completed, page.completed],
-            ["Not completed users", m.notCompleted, page.notCompleted],
-          ] as const
-        ).forEach((column, i) => {
-          const x = 0.5 + i * 4.7;
-          target.addText(`${column[0]} · ${column[1]}`, {
+        const groups = [
+          page.completed.length > 0 || (m.completed === 0 && page.showChart)
+            ? {
+                title: "Completed users",
+                total: m.completed,
+                rows: page.completed,
+                start: page.completedStart,
+              }
+            : null,
+          page.notCompleted.length > 0 || (m.notCompleted === 0 && page.showChart && m.completed === 0)
+            ? {
+                title: "Not completed users",
+                total: m.notCompleted,
+                rows: page.notCompleted,
+                start: page.notCompletedStart,
+              }
+            : null,
+        ].filter((group) => group != null);
+        const wide = groups.length < 2;
+        groups.forEach((group, i) => {
+          const x = wide ? 0.5 : 0.45 + i * 4.75;
+          const w = wide ? 9.1 : 4.5;
+          target.addText(`${group.title}  ·  ${group.total}`, {
             x,
             y: listTop,
-            w: 4.4,
+            w,
             h: 0.28,
             fontSize: 12,
             bold: true,
             color: C.ink,
           });
-          const body = userTable(column[2], column[1]);
+          const body = userTable(group.rows, group.total, group.start, wide);
           if (body.length === 0) return;
           target.addTable(body, {
             x,
-            y: listTop + 0.32,
-            w: 4.4,
-            colW: [2.3, 2.1],
-            border: { type: "solid", pt: 0, color: C.bg },
+            y: listTop + 0.3,
+            w,
+            colW: wide ? [0.5, 2.8, 3, 2.8] : [0.45, 2.05, 2],
+            border: [
+              { pt: 0, color: C.bg },
+              { pt: 0, color: C.bg },
+              { pt: 0.5, color: C.card },
+              { pt: 0, color: C.bg },
+            ],
             fontFace: "Calibri",
+            valign: "middle",
           });
         });
       });

@@ -1,7 +1,6 @@
 import { Check, Clock, Hand, TrendingUp } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import {
-  CompletionSplitChart,
   DistributionChart,
   ScoreBarChart,
   ShareChart,
@@ -308,46 +307,111 @@ function AssessmentSlide({ model }: { model: ReportModel }) {
   );
 }
 
-function UserColumn({
+function UserTable({
   title,
   total,
   rows,
+  start,
   model,
+  wide,
 }: {
   title: string;
   total: number;
   rows: CompletionUser[];
+  start: number;
   model: ReportModel;
+  wide: boolean;
 }) {
   const c = colors(model);
+  const columns = wide
+    ? "grid-cols-[0.45fr_1.7fr_1.6fr_1.3fr]"
+    : "grid-cols-[0.4fr_1.35fr_1.25fr]";
   return (
     <div className="min-h-0">
-      <p className="slide-body font-semibold" style={{ color: hex(c.ink) }}>
-        {title} · {total}
-      </p>
-      <div className="mt-[0.5cqw] flex flex-col">
-        {rows.length === 0 && total === 0 ? (
-          <p className="slide-body tabular-nums">0</p>
-        ) : (
-          rows.map((user, i) => (
-            <div
-              key={`${user.participant}-${user.course}-${user.status}-${i}`}
-              className="slide-body flex items-center gap-[0.6cqw] rounded-[0.4cqw] px-[0.4cqw] py-[0.22cqw]"
-              style={{ backgroundColor: i % 2 === 0 ? hex(c.card) : "transparent" }}
-            >
-              <span className="min-w-0 flex-1 truncate">{user.participant}</span>
-              <span className="max-w-[48%] truncate text-right">{user.course}</span>
-            </div>
-          ))
-        )}
+      <div className="mb-[0.7cqw] flex items-baseline gap-[0.8cqw]">
+        <p className="font-display font-bold" style={{ fontSize: "1.85cqw", color: hex(c.ink) }}>
+          {title}
+        </p>
+        <p className="slide-body font-semibold tabular-nums" style={{ color: hex(c.ink) }}>
+          {total}
+        </p>
       </div>
+      <div
+        className={cn(
+          "slide-body grid gap-[0.6cqw] pb-[0.4cqw] font-semibold",
+          columns,
+        )}
+        style={{ color: hex(c.ink), borderBottom: `1px solid ${hex(c.card)}` }}
+      >
+        <span>#</span>
+        <span>Participant</span>
+        <span>Course</span>
+        {wide ? <span>Department</span> : null}
+      </div>
+      {rows.length === 0 && total === 0 ? (
+        <div
+          className={cn("slide-body grid items-center gap-[0.6cqw] rounded-[0.45cqw] px-[0.35cqw] py-[0.45cqw]", columns)}
+          style={{ backgroundColor: hex(c.card) }}
+        >
+          <span />
+          <span className="tabular-nums" style={{ color: hex(c.ink) }}>
+            0
+          </span>
+          <span />
+          {wide ? <span /> : null}
+        </div>
+      ) : (
+        rows.map((user, i) => (
+          <div
+            key={`${user.participant}-${user.course}-${user.status}-${start + i}`}
+            className={cn(
+              "slide-body grid items-center gap-[0.6cqw] rounded-[0.45cqw] px-[0.35cqw] py-[0.34cqw]",
+              columns,
+            )}
+            style={{ backgroundColor: i % 2 === 0 ? hex(c.card) : "transparent" }}
+          >
+            <span className="tabular-nums">{start + i + 1}</span>
+            <span className="truncate font-medium" style={{ color: hex(c.ink) }}>
+              {user.participant}
+            </span>
+            <span className="truncate">{user.course}</span>
+            {wide ? <span className="truncate">{user.department}</span> : null}
+          </div>
+        ))
+      )}
     </div>
   );
 }
 
 function CompletionSlide({ model, page }: { model: ReportModel; page: CompletionPage }) {
   const m = model.metrics;
+  const c = colors(model);
   const continued = page.total > 1 ? ` · page ${page.index + 1} of ${page.total}` : "";
+  const chartSlices = m.completionSplit
+    .map((item, i) => ({ ...item, color: hex(sc(model, i)) }))
+    .filter((item) => item.count > 0);
+  const tables = [
+    page.completed.length > 0 || (m.completed === 0 && page.showChart)
+      ? {
+          key: "completed",
+          title: "Completed users",
+          total: m.completed,
+          rows: page.completed,
+          start: page.completedStart,
+        }
+      : null,
+    page.notCompleted.length > 0 || (m.notCompleted === 0 && page.showChart && m.completed === 0)
+      ? {
+          key: "not-completed",
+          title: "Not completed users",
+          total: m.notCompleted,
+          rows: page.notCompleted,
+          start: page.notCompletedStart,
+        }
+      : null,
+  ].filter((table) => table != null);
+  const wide = tables.length < 2;
+
   return (
     <SlideFrame className="flex flex-col">
       <SlideHeader
@@ -356,24 +420,63 @@ function CompletionSlide({ model, page }: { model: ReportModel; page: Completion
         model={model}
       />
       {page.showChart ? (
-        <div className="mt-[1.4cqw] grid h-[16cqw] grid-cols-[0.85fr_1.15fr] gap-[2cqw]">
-          <div className="grid grid-cols-2 content-start gap-[1cqw]">
-            <Stat model={model} value={String(m.completed)} label="Completed" />
-            <Stat model={model} value={String(m.notCompleted)} label="Not completed" />
+        <div className="mt-[1.5cqw] grid h-[18cqw] grid-cols-[0.9fr_1.15fr] items-center gap-[2.4cqw]">
+          <div className="h-full min-h-0">
+            {chartSlices.length > 0 ? (
+              <ShareChart
+                data={chartSlices}
+                colors={chartSlices.map((slice) => slice.color)}
+                variant="donut"
+                palette={model.palette}
+              />
+            ) : (
+              <div className="flex h-full items-center justify-center">
+                <p className="slide-kpi" style={{ fontSize: "4cqw" }}>
+                  0
+                </p>
+              </div>
+            )}
           </div>
-          <div className="min-h-0">
-            <CompletionSplitChart data={m.completionSplit} palette={model.palette} />
+          <div className="flex flex-col justify-center gap-[1cqw]">
+            {m.completionSplit.map((item, i) => (
+              <div
+                key={item.label}
+                className="flex items-center gap-[1cqw] rounded-[1cqw] px-[1.3cqw] py-[1cqw]"
+                style={{ backgroundColor: hex(c.card) }}
+              >
+                <span
+                  className="h-[1.5cqw] w-[1.5cqw] shrink-0 rounded-[0.3cqw]"
+                  style={{ backgroundColor: hex(sc(model, i)) }}
+                />
+                <span className="slide-body min-w-0 flex-1 truncate" style={{ color: hex(c.ink) }}>
+                  {item.label}
+                </span>
+                <span className="slide-kpi tabular-nums" style={{ fontSize: "2.8cqw" }}>
+                  {item.count}
+                </span>
+                <span
+                  className="slide-body w-[6.5cqw] text-right font-semibold tabular-nums"
+                  style={{ color: hex(c.ink) }}
+                >
+                  {item.pct}%
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       ) : null}
-      <div className="mt-[1.2cqw] grid flex-1 grid-cols-2 gap-[2cqw]">
-        <UserColumn title="Completed users" total={m.completed} rows={page.completed} model={model} />
-        <UserColumn
-          title="Not completed users"
-          total={m.notCompleted}
-          rows={page.notCompleted}
-          model={model}
-        />
+      <div className={cn("mt-[1.4cqw] grid flex-1 gap-[2.2cqw]", tables.length > 1 && "grid-cols-2")}>
+        {tables.map((table) => (
+          <UserTable
+            key={table.key}
+            title={table.title}
+            total={table.total}
+            rows={table.rows}
+            start={table.start}
+            model={model}
+            wide={wide}
+          />
+        ))}
       </div>
     </SlideFrame>
   );

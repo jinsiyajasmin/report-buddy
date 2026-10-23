@@ -44,6 +44,8 @@ export interface CompletionUser {
 export interface CompletionPage {
   completed: CompletionUser[];
   notCompleted: CompletionUser[];
+  completedStart: number;
+  notCompletedStart: number;
   showChart: boolean;
   index: number;
   total: number;
@@ -159,17 +161,19 @@ function byUser(a: CompletionUser, b: CompletionUser): number {
   return a.participant.localeCompare(b.participant) || a.course.localeCompare(b.course);
 }
 
-const FIRST_PAGE_ROWS = 8;
-const NEXT_PAGE_ROWS = 14;
+const FIRST_PAGE_ROWS = 5;
+const NEXT_PAGE_ROWS = 11;
 
 /** Splits the two lists across pages so every user is shown, including a 0 group. */
 export function completionPages(metrics: Pick<Metrics, "completedUsers" | "notCompletedUsers">): CompletionPage[] {
   const completed = metrics.completedUsers;
   const notCompleted = metrics.notCompletedUsers;
-  const slices: { completed: CompletionUser[]; notCompleted: CompletionUser[]; showChart: boolean }[] = [
+  const slices: Omit<CompletionPage, "index" | "total">[] = [
     {
       completed: completed.slice(0, FIRST_PAGE_ROWS),
       notCompleted: notCompleted.slice(0, FIRST_PAGE_ROWS),
+      completedStart: 0,
+      notCompletedStart: 0,
       showChart: true,
     },
   ];
@@ -178,6 +182,8 @@ export function completionPages(metrics: Pick<Metrics, "completedUsers" | "notCo
     slices.push({
       completed: completed.slice(offset, offset + NEXT_PAGE_ROWS),
       notCompleted: notCompleted.slice(offset, offset + NEXT_PAGE_ROWS),
+      completedStart: offset,
+      notCompletedStart: offset,
       showChart: false,
     });
     offset += NEXT_PAGE_ROWS;
