@@ -262,16 +262,14 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
         users: CompletionUser[],
         total: number,
         start: number,
-        wide: boolean,
       ): PptxGenJS.TableRow[] => {
         const head: PptxGenJS.TableRow = [
           cell("#", { bold: true, color: C.ink }),
           cell("Participant", { bold: true, color: C.ink }),
           cell("Course", { bold: true, color: C.ink }),
-          ...(wide ? [cell("Department", { bold: true, color: C.ink })] : []),
         ];
         if (users.length === 0 && total === 0) {
-          return [head, [cell(""), cell("0", { color: C.ink }), cell(""), ...(wide ? [cell("")] : [])]];
+          return [head, [cell(""), cell("0", { color: C.ink }), cell("")]];
         }
         return [
           head,
@@ -279,7 +277,6 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
             cell(String(start + i + 1)),
             cell(user.participant, { color: C.ink }),
             cell(user.course),
-            ...(wide ? [cell(user.department)] : []),
           ]),
         ];
       };
@@ -423,13 +420,13 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
             bold: true,
             color: C.ink,
           });
-          const body = userTable(group.rows, group.total, group.start, wide);
+          const body = userTable(group.rows, group.total, group.start);
           if (body.length === 0) return;
           target.addTable(body, {
             x,
             y: listTop + 0.3,
             w,
-            colW: wide ? [0.5, 2.8, 3, 2.8] : [0.45, 2.05, 2],
+            colW: wide ? [0.7, 4.2, 4.2] : [0.45, 2.05, 2],
             border: [
               { pt: 0, color: C.bg },
               { pt: 0, color: C.bg },

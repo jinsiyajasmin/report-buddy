@@ -313,19 +313,15 @@ function UserTable({
   rows,
   start,
   model,
-  wide,
 }: {
   title: string;
   total: number;
   rows: CompletionUser[];
   start: number;
   model: ReportModel;
-  wide: boolean;
 }) {
   const c = colors(model);
-  const columns = wide
-    ? "grid-cols-[0.45fr_1.7fr_1.6fr_1.3fr]"
-    : "grid-cols-[0.4fr_1.35fr_1.25fr]";
+  const columns = "grid-cols-[0.4fr_1.5fr_1.5fr]";
   return (
     <div className="min-h-0">
       <div className="mb-[0.7cqw] flex items-baseline gap-[0.8cqw]">
@@ -346,7 +342,6 @@ function UserTable({
         <span>#</span>
         <span>Participant</span>
         <span>Course</span>
-        {wide ? <span>Department</span> : null}
       </div>
       {rows.length === 0 && total === 0 ? (
         <div
@@ -358,7 +353,6 @@ function UserTable({
             0
           </span>
           <span />
-          {wide ? <span /> : null}
         </div>
       ) : (
         rows.map((user, i) => (
@@ -375,7 +369,6 @@ function UserTable({
               {user.participant}
             </span>
             <span className="truncate">{user.course}</span>
-            {wide ? <span className="truncate">{user.department}</span> : null}
           </div>
         ))
       )}
@@ -410,7 +403,6 @@ function CompletionSlide({ model, page }: { model: ReportModel; page: Completion
         }
       : null,
   ].filter((table) => table != null);
-  const wide = tables.length < 2;
 
   return (
     <SlideFrame className="flex flex-col">
@@ -474,7 +466,6 @@ function CompletionSlide({ model, page }: { model: ReportModel; page: Completion
             rows={table.rows}
             start={table.start}
             model={model}
-            wide={wide}
           />
         ))}
       </div>
