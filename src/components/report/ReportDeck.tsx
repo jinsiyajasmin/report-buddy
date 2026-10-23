@@ -1,11 +1,13 @@
 import { Check, Clock, Hand, TrendingUp } from "lucide-react";
 import type { CSSProperties, ReactNode } from "react";
 import {
+  CompletionSplitChart,
   DistributionChart,
   ScoreBarChart,
   ShareChart,
   TrendChart,
 } from "@/components/report/ReportCharts";
+import { completionPages, type CompletionPage, type CompletionUser } from "@/calculations/metrics";
 import { hex, seriesColor } from "@/reports/theme";
 import type { ReportModel } from "@/reports/model";
 import type { SectionKey } from "@/types/report";
@@ -306,6 +308,77 @@ function AssessmentSlide({ model }: { model: ReportModel }) {
   );
 }
 
+function UserColumn({
+  title,
+  total,
+  rows,
+  model,
+}: {
+  title: string;
+  total: number;
+  rows: CompletionUser[];
+  model: ReportModel;
+}) {
+  const c = colors(model);
+  return (
+    <div className="min-h-0">
+      <p className="slide-body font-semibold" style={{ color: hex(c.ink) }}>
+        {title} · {total}
+      </p>
+      <div className="mt-[0.5cqw] flex flex-col">
+        {rows.length === 0 && total === 0 ? (
+          <p className="slide-body tabular-nums">0</p>
+        ) : (
+          rows.map((user, i) => (
+            <div
+              key={`${user.participant}-${user.course}-${user.status}-${i}`}
+              className="slide-body flex items-center gap-[0.6cqw] rounded-[0.4cqw] px-[0.4cqw] py-[0.22cqw]"
+              style={{ backgroundColor: i % 2 === 0 ? hex(c.card) : "transparent" }}
+            >
+              <span className="min-w-0 flex-1 truncate">{user.participant}</span>
+              <span className="max-w-[48%] truncate text-right">{user.course}</span>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function CompletionSlide({ model, page }: { model: ReportModel; page: CompletionPage }) {
+  const m = model.metrics;
+  const continued = page.total > 1 ? ` · page ${page.index + 1} of ${page.total}` : "";
+  return (
+    <SlideFrame className="flex flex-col">
+      <SlideHeader
+        title="Completed and not completed"
+        subtitle={`${m.completed} completed · ${m.notCompleted} not completed${continued}`}
+        model={model}
+      />
+      {page.showChart ? (
+        <div className="mt-[1.4cqw] grid h-[16cqw] grid-cols-[0.85fr_1.15fr] gap-[2cqw]">
+          <div className="grid grid-cols-2 content-start gap-[1cqw]">
+            <Stat model={model} value={String(m.completed)} label="Completed" />
+            <Stat model={model} value={String(m.notCompleted)} label="Not completed" />
+          </div>
+          <div className="min-h-0">
+            <CompletionSplitChart data={m.completionSplit} palette={model.palette} />
+          </div>
+        </div>
+      ) : null}
+      <div className="mt-[1.2cqw] grid flex-1 grid-cols-2 gap-[2cqw]">
+        <UserColumn title="Completed users" total={m.completed} rows={page.completed} model={model} />
+        <UserColumn
+          title="Not completed users"
+          total={m.notCompleted}
+          rows={page.notCompleted}
+          model={model}
+        />
+      </div>
+    </SlideFrame>
+  );
+}
+
 function ParticipantsSlide({ model }: { model: ReportModel }) {
   const m = model.metrics;
   const rows = m.participants.slice(0, 12);
@@ -428,7 +501,7 @@ function ClosingSlide({ model }: { model: ReportModel }) {
   );
 }
 
-const RENDERERS: Record<SectionKey, (p: { model: ReportModel }) => ReactNode> = {
+const RENDERERS: Record<Exclude<SectionKey, "completion">, (p: { model: ReportModel }) => ReactNode> = {
   cover: CoverSlide,
   summary: SummarySlide,
   enrolment: EnrolmentSlide,
@@ -456,19 +529,24 @@ export function ReportDeck({ model, printable = false }: { model: ReportModel; p
       id={printable ? "print-root" : undefined}
       style={themeVars}
     >
-      {model.visibleSections.map((key) => {
-        const Slide = RENDERERS[key];
-        return (
-          <div
-            key={key}
-            className={cn(
-              "overflow-hidden rounded-xl border border-border shadow-sm",
-              printable && "print-page rounded-none border-0 shadow-none",
-            )}
-          >
-            <Slide model={model} />
-          </div>
+      {model.visibleSections.flatMap((key) => {
+        const frame = cn(
+          "overflow-hidden rounded-xl border border-border shadow-sm",
+          printable && "print-page rounded-none border-0 shadow-none",
         );
+        if (key === "completion") {
+          return completionPages(model.metrics).map((page) => (
+            <div key={`completion-${page.index}`} className={frame}>
+              <CompletionSlide model={model} page={page} />
+            </div>
+          ));
+        }
+        const Slide = RENDERERS[key];
+        return [
+          <div key={key} className={frame}>
+            <Slide model={model} />
+          </div>,
+        ];
       })}
     </div>
   );

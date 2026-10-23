@@ -32,6 +32,23 @@ export interface ParticipantStat {
   courses: string[];
 }
 
+/** One uploaded row, kept so a zero group still has an explicit count of 0. */
+export interface CompletionUser {
+  participant: string;
+  course: string;
+  department: string;
+  status: string;
+  score: number | null;
+}
+
+export interface CompletionPage {
+  completed: CompletionUser[];
+  notCompleted: CompletionUser[];
+  showChart: boolean;
+  index: number;
+  total: number;
+}
+
 export interface Metrics {
   totalEnrolments: number;
   uniqueParticipants: number;
@@ -39,7 +56,11 @@ export interface Metrics {
   courses: CourseStat[];
   statuses: Bucket[];
   completed: number;
+  notCompleted: number;
   completionRate: number;
+  completionSplit: Bucket[];
+  completedUsers: CompletionUser[];
+  notCompletedUsers: CompletionUser[];
   assessed: number;
   passed: number;
   failed: number;
@@ -116,6 +137,54 @@ export function isPass(score: number | null, passMark: number): boolean {
   return score != null && score >= passMark;
 }
 
+/** True only for a positive completion. "Not completed" and "Incomplete" stay incomplete. */
+export function isCompletedStatus(status: string): boolean {
+  const s = status.trim().toLowerCase().replace(/[_-]+/g, " ");
+  if (!s) return false;
+  if (/\b(not|non|un)\b[\s-]*complet/.test(s) || s.includes("incomplete")) return false;
+  return /\bcomplet/.test(s);
+}
+
+function toCompletionUser(record: TrainingRecord): CompletionUser {
+  return {
+    participant: record.participant.trim() || "Unnamed",
+    course: record.course.trim() || "Unspecified course",
+    department: record.department.trim(),
+    status: record.status.trim() || "Not recorded",
+    score: record.score,
+  };
+}
+
+function byUser(a: CompletionUser, b: CompletionUser): number {
+  return a.participant.localeCompare(b.participant) || a.course.localeCompare(b.course);
+}
+
+const FIRST_PAGE_ROWS = 8;
+const NEXT_PAGE_ROWS = 14;
+
+/** Splits the two lists across pages so every user is shown, including a 0 group. */
+export function completionPages(metrics: Pick<Metrics, "completedUsers" | "notCompletedUsers">): CompletionPage[] {
+  const completed = metrics.completedUsers;
+  const notCompleted = metrics.notCompletedUsers;
+  const slices: { completed: CompletionUser[]; notCompleted: CompletionUser[]; showChart: boolean }[] = [
+    {
+      completed: completed.slice(0, FIRST_PAGE_ROWS),
+      notCompleted: notCompleted.slice(0, FIRST_PAGE_ROWS),
+      showChart: true,
+    },
+  ];
+  let offset = FIRST_PAGE_ROWS;
+  while (offset < completed.length || offset < notCompleted.length) {
+    slices.push({
+      completed: completed.slice(offset, offset + NEXT_PAGE_ROWS),
+      notCompleted: notCompleted.slice(offset, offset + NEXT_PAGE_ROWS),
+      showChart: false,
+    });
+    offset += NEXT_PAGE_ROWS;
+  }
+  return slices.map((page, index) => ({ ...page, index, total: slices.length }));
+}
+
 export function computeMetrics(records: TrainingRecord[], passMark = 80): Metrics {
   const valid = records.filter((r) => r.course.trim() !== "" || r.participant.trim() !== "");
   const total = valid.length;
@@ -147,7 +216,20 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
     tally(valid.map((r) => (r.status.trim() ? r.status.trim() : "Not recorded"))),
     total,
   );
-  const completed = valid.filter((r) => r.status.toLowerCase().includes("complet")).length;
+  const completedUsers = valid
+    .filter((r) => isCompletedStatus(r.status))
+    .map(toCompletionUser)
+    .sort(byUser);
+  const notCompletedUsers = valid
+    .filter((r) => !isCompletedStatus(r.status))
+    .map(toCompletionUser)
+    .sort(byUser);
+  const completed = completedUsers.length;
+  const notCompleted = notCompletedUsers.length;
+  const completionSplit: Bucket[] = [
+    { label: "Completed", count: completed, pct: pctOf(completed, total) },
+    { label: "Not completed", count: notCompleted, pct: pctOf(notCompleted, total) },
+  ];
 
   const scoredRows = valid.filter((r) => r.score != null && r.score >= 0 && r.score <= 100);
   const scores = scoredRows.map((r) => r.score as number);
@@ -213,7 +295,7 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
         participant,
         department: rows.find((r) => r.department.trim())?.department.trim() ?? "",
         enrolments: rows.length,
-        completed: rows.filter((r) => r.status.toLowerCase().includes("complet")).length,
+        completed: rows.filter((r) => isCompletedStatus(r.status)).length,
         avgScore: scored.length
           ? round(scored.reduce((a, b) => a + b, 0) / scored.length, 1)
           : null,
@@ -249,7 +331,11 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
     courses,
     statuses,
     completed,
+    notCompleted,
     completionRate: pctOf(completed, total),
+    completionSplit,
+    completedUsers,
+    notCompletedUsers,
     assessed,
     passed,
     failed,

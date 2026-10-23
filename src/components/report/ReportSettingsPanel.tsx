@@ -118,7 +118,7 @@ export function ReportSettingsPanel({
               </Label>
               <Switch
                 id={`sec-${key}`}
-                checked={config.sections[key]}
+                checked={config.sections[key] !== false}
                 onCheckedChange={(checked) =>
                   onChange({ sections: { ...config.sections, [key]: checked } })
                 }

@@ -203,6 +203,80 @@ export function TrendChart({
   );
 }
 
+function CountLabel({
+  x = 0,
+  y = 0,
+  width = 0,
+  height = 0,
+  value,
+  fill,
+}: {
+  x?: number;
+  y?: number;
+  width?: number;
+  height?: number;
+  value?: number;
+  fill?: string;
+}) {
+  if (value == null || Number.isNaN(Number(value))) return null;
+  return (
+    <text
+      x={x + Math.max(width, 0) + 8}
+      y={y + height / 2}
+      dominantBaseline="middle"
+      fill={fill}
+      fontSize={12}
+    >
+      {value}
+    </text>
+  );
+}
+
+/** Completed vs not completed. A count of 0 stays 0 on the chart. */
+export function CompletionSplitChart({
+  data,
+  palette = fallback,
+}: {
+  data: ChartDatum[];
+  palette?: Palette;
+}) {
+  const peak = Math.max(1, ...data.map((d) => d.count));
+  return (
+    <ResponsiveContainer width="100%" height="100%">
+      <BarChart data={data} layout="vertical" margin={{ left: 8, right: 36, top: 4, bottom: 4 }}>
+        <XAxis type="number" hide domain={[0, peak]} />
+        <YAxis
+          type="category"
+          dataKey="label"
+          width={108}
+          tick={{ fontSize: 11, fill: hex(palette.colors.muted) }}
+          axisLine={false}
+          tickLine={false}
+        />
+        <Tooltip content={<ChartTooltip />} cursor={{ fill: "rgba(127,127,127,0.12)" }} />
+        <Bar dataKey="count" radius={[0, 6, 6, 0]} isAnimationActive={false} barSize={18}>
+          {data.map((d, i) => (
+            <Cell key={d.label} fill={hex(seriesColor(i, palette.series))} />
+          ))}
+          <LabelList
+            dataKey="count"
+            content={(props) => (
+              <CountLabel
+                x={Number(props.x)}
+                y={Number(props.y)}
+                width={Number(props.width)}
+                height={Number(props.height)}
+                value={Number(props.value)}
+                fill={hex(palette.colors.ink)}
+              />
+            )}
+          />
+        </Bar>
+      </BarChart>
+    </ResponsiveContainer>
+  );
+}
+
 /** Horizontal score bars (0–100) — used for participant averages. */
 export function ScoreBarChart({
   data,

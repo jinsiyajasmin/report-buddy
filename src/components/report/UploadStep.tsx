@@ -163,6 +163,8 @@ export function UploadStep({
             <CardContent className="space-y-4">
               <ul className="space-y-1.5 text-sm">
                 <Line ok>{parsed.rows.length} records imported</Line>
+                <Line ok>{metrics.completed} completed</Line>
+                <Line ok>{metrics.notCompleted} not completed</Line>
                 <Line ok>{parsed.headers.length} columns detected</Line>
                 <Line ok={metrics.courseCount > 0}>
                   {metrics.courseCount} training {metrics.courseCount === 1 ? "course" : "courses"}{" "}

@@ -63,6 +63,7 @@ export type SectionKey =
   | "cover"
   | "summary"
   | "enrolment"
+  | "completion"
   | "trends"
   | "insights"
   | "assessment"
@@ -74,6 +75,7 @@ export const SECTION_LABELS: Record<SectionKey, string> = {
   cover: "Cover",
   summary: "Executive Summary",
   enrolment: "Enrolment Overview",
+  completion: "Completed & not completed",
   trends: "Enrolment Trends & Departments",
   insights: "What the Numbers Tell Us",
   assessment: "Assessment Results",
@@ -137,6 +139,7 @@ export function defaultConfig(): ReportConfig {
       cover: true,
       summary: true,
       enrolment: true,
+      completion: true,
       trends: true,
       insights: true,
       assessment: true,

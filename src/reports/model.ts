@@ -28,6 +28,7 @@ const ORDER: SectionKey[] = [
   "cover",
   "summary",
   "enrolment",
+  "completion",
   "trends",
   "insights",
   "assessment",

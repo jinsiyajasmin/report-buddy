@@ -1,4 +1,5 @@
 import PptxGenJS from "pptxgenjs";
+import { completionPages, type CompletionUser } from "@/calculations/metrics";
 import type { ReportModel } from "@/reports/model";
 import type { PaletteColors } from "@/reports/theme";
 
@@ -249,6 +250,134 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
           color: C.muted,
         });
       }
+    }
+
+    if (section === "completion") {
+      const pages = completionPages(m);
+      const userTable = (users: CompletionUser[], total: number): PptxGenJS.TableRow[] => {
+        if (users.length === 0 && total === 0) {
+          return [
+            [
+              { text: "0", options: { fontSize: 11, color: C.muted } },
+              { text: "", options: { fontSize: 11, color: C.muted } },
+            ],
+          ];
+        }
+        return users.map((user) => [
+          { text: user.participant, options: { fontSize: 10, color: C.muted } },
+          {
+            text: user.course,
+            options: { fontSize: 10, align: "right" as const, color: C.muted },
+          },
+        ]);
+      };
+
+      pages.forEach((page, pageIndex) => {
+        const target = pageIndex === 0 ? slide : pptx.addSlide();
+        if (pageIndex > 0) target.background = bg;
+        const continued = page.total > 1 ? ` · page ${page.index + 1} of ${page.total}` : "";
+        heading(
+          target,
+          C,
+          "Completed and not completed",
+          `${m.completed} completed · ${m.notCompleted} not completed${continued}`,
+        );
+        addLogo(target, model);
+
+        let listTop = 1.45;
+        if (page.showChart) {
+          (
+            [
+              ["Completed", m.completed],
+              ["Not completed", m.notCompleted],
+            ] as const
+          ).forEach((card, i) => {
+            const x = 0.5 + i * 2.15;
+            target.addShape("roundRect", {
+              x,
+              y: 1.5,
+              w: 2,
+              h: 1.15,
+              fill: { color: C.card },
+              line: { color: C.card },
+              rectRadius: 0.08,
+            });
+            target.addText(String(card[1]), {
+              x,
+              y: 1.58,
+              w: 2,
+              h: 0.62,
+              fontSize: 28,
+              bold: true,
+              align: "center",
+              color: C.ink,
+              fontFace: "Georgia",
+            });
+            target.addText(card[0], {
+              x,
+              y: 2.18,
+              w: 2,
+              h: 0.32,
+              fontSize: 11,
+              align: "center",
+              color: C.muted,
+            });
+          });
+          target.addChart(
+            pptx.ChartType.bar,
+            [
+              {
+                name: "Users",
+                labels: m.completionSplit.map((d) => d.label),
+                values: m.completionSplit.map((d) => d.count),
+              },
+            ],
+            {
+              ...chartBase,
+              x: 4.9,
+              y: 1.35,
+              w: 4.6,
+              h: 1.55,
+              barDir: "col",
+              chartColors: [seriesColor(0), seriesColor(1)],
+              showLegend: false,
+              showValue: true,
+              valAxisHidden: true,
+              catAxisLabelColor: C.muted,
+              varyColors: true,
+            } as PptxGenJS.IChartOpts,
+          );
+          listTop = 2.85;
+        }
+
+        (
+          [
+            ["Completed users", m.completed, page.completed],
+            ["Not completed users", m.notCompleted, page.notCompleted],
+          ] as const
+        ).forEach((column, i) => {
+          const x = 0.5 + i * 4.7;
+          target.addText(`${column[0]} · ${column[1]}`, {
+            x,
+            y: listTop,
+            w: 4.4,
+            h: 0.28,
+            fontSize: 12,
+            bold: true,
+            color: C.ink,
+          });
+          const body = userTable(column[2], column[1]);
+          if (body.length === 0) return;
+          target.addTable(body, {
+            x,
+            y: listTop + 0.32,
+            w: 4.4,
+            colW: [2.3, 2.1],
+            border: { type: "solid", pt: 0, color: C.bg },
+            fontFace: "Calibri",
+          });
+        });
+      });
     }
 
     if (section === "trends") {
