@@ -1,17 +1,35 @@
 import type { TrainingRecord } from "@/types/report";
 
+export type StatusKey = "completed" | "inProgress" | "notCompleted";
+
+export const STATUS_ORDER: StatusKey[] = ["completed", "inProgress", "notCompleted"];
+
+export const STATUS_LABELS: Record<StatusKey, string> = {
+  completed: "Completed",
+  inProgress: "In progress",
+  notCompleted: "Not completed",
+};
+
 export interface CourseStat {
   course: string;
   count: number;
   pct: number;
   participants: number;
   avgScore: number | null;
+  completed: number;
+  inProgress: number;
+  notCompleted: number;
+  completionRate: number;
 }
 
 export interface Bucket {
   label: string;
   count: number;
   pct: number;
+}
+
+export interface StatusBucket extends Bucket {
+  key: StatusKey;
 }
 
 export interface PerformerStat {
@@ -25,6 +43,8 @@ export interface ParticipantStat {
   department: string;
   enrolments: number;
   completed: number;
+  inProgress: number;
+  notCompleted: number;
   avgScore: number | null;
   bestScore: number | null;
   lowestScore: number | null;
@@ -32,21 +52,36 @@ export interface ParticipantStat {
   courses: string[];
 }
 
-/** One uploaded row, kept so a zero group still has an explicit count of 0. */
-export interface CompletionUser {
-  participant: string;
+export interface StatusCourse {
   course: string;
-  department: string;
-  status: string;
   score: number | null;
 }
 
-export interface CompletionPage {
-  completed: CompletionUser[];
-  notCompleted: CompletionUser[];
-  completedStart: number;
-  notCompletedStart: number;
-  showChart: boolean;
+/** One person inside a status group. Each person appears once per group. */
+export interface StatusUser {
+  participant: string;
+  department: string;
+  courses: StatusCourse[];
+}
+
+export interface StatusGroup {
+  key: StatusKey;
+  label: string;
+  /** Course assignments in this status. */
+  assignments: number;
+  pct: number;
+  users: StatusUser[];
+}
+
+export interface StatusBlock {
+  group: StatusGroup;
+  rows: StatusUser[];
+  start: number;
+  continued: boolean;
+}
+
+export interface StatusPage {
+  blocks: StatusBlock[];
   index: number;
   total: number;
 }
@@ -58,11 +93,12 @@ export interface Metrics {
   courses: CourseStat[];
   statuses: Bucket[];
   completed: number;
+  inProgress: number;
   notCompleted: number;
   completionRate: number;
-  completionSplit: Bucket[];
-  completedUsers: CompletionUser[];
-  notCompletedUsers: CompletionUser[];
+  completionSplit: StatusBucket[];
+  statusGroups: StatusGroup[];
+  duplicatesRemoved: number;
   assessed: number;
   passed: number;
   failed: number;
@@ -111,6 +147,12 @@ export function pctOf(part: number, total: number): number {
   return round((part / total) * 100);
 }
 
+/** "100.0" → "100%", 86.666 → "86.7%", no score → "—". */
+export function formatScore(score: number | null | undefined): string {
+  if (score == null || !Number.isFinite(score)) return "—";
+  return `${round(score, 1)}%`;
+}
+
 function tally(values: string[]): Map<string, number> {
   const map = new Map<string, number>();
   for (const v of values) {
@@ -139,81 +181,201 @@ export function isPass(score: number | null, passMark: number): boolean {
   return score != null && score >= passMark;
 }
 
+function normaliseStatus(status: string): string {
+  return status.trim().toLowerCase().replace(/[_-]+/g, " ");
+}
+
 /** True only for a positive completion. "Not completed" and "Incomplete" stay incomplete. */
 export function isCompletedStatus(status: string): boolean {
-  const s = status.trim().toLowerCase().replace(/[_-]+/g, " ");
+  const s = normaliseStatus(status);
   if (!s) return false;
-  if (/\b(not|non|un)\b[\s-]*complet/.test(s) || s.includes("incomplete")) return false;
-  return /\bcomplet/.test(s);
+  if (/\b(not|non|un)\b[\s-]*(complet|pass)/.test(s) || s.includes("incomplete")) return false;
+  return /\bcomplet/.test(s) || /\bpass(ed)?\b/.test(s);
 }
 
-function toCompletionUser(record: TrainingRecord): CompletionUser {
-  return {
-    participant: record.participant.trim() || "Unnamed",
-    course: record.course.trim() || "Unspecified course",
-    department: record.department.trim(),
-    status: record.status.trim() || "Not recorded",
-    score: record.score,
-  };
-}
-
-function byUser(a: CompletionUser, b: CompletionUser): number {
-  return a.participant.localeCompare(b.participant) || a.course.localeCompare(b.course);
-}
-
-const FIRST_PAGE_ROWS = 5;
-const NEXT_PAGE_ROWS = 11;
-
-/** Splits the two lists across pages so every user is shown, including a 0 group. */
-export function completionPages(metrics: Pick<Metrics, "completedUsers" | "notCompletedUsers">): CompletionPage[] {
-  const completed = metrics.completedUsers;
-  const notCompleted = metrics.notCompletedUsers;
-  const slices: Omit<CompletionPage, "index" | "total">[] = [
-    {
-      completed: completed.slice(0, FIRST_PAGE_ROWS),
-      notCompleted: notCompleted.slice(0, FIRST_PAGE_ROWS),
-      completedStart: 0,
-      notCompletedStart: 0,
-      showChart: true,
-    },
-  ];
-  let offset = FIRST_PAGE_ROWS;
-  while (offset < completed.length || offset < notCompleted.length) {
-    slices.push({
-      completed: completed.slice(offset, offset + NEXT_PAGE_ROWS),
-      notCompleted: notCompleted.slice(offset, offset + NEXT_PAGE_ROWS),
-      completedStart: offset,
-      notCompletedStart: offset,
-      showChart: false,
-    });
-    offset += NEXT_PAGE_ROWS;
+/** Sorts any status wording into completed / in progress / not completed. */
+export function statusKey(status: string): StatusKey {
+  if (isCompletedStatus(status)) return "completed";
+  const s = normaliseStatus(status);
+  if (!s) return "notCompleted";
+  if (/\bnot\s+(yet\s+)?(started|begun|attempted)/.test(s) || /\bun(started|attempted)\b/.test(s)) {
+    return "notCompleted";
   }
-  return slices.map((page, index) => ({ ...page, index, total: slices.length }));
+  if (/progress|ongoing|underway|started|incomplete|partial|attempt/.test(s)) return "inProgress";
+  return "notCompleted";
+}
+
+/** "mathew  slater" → "Mathew Slater". Only the first letter of each word is touched. */
+export function displayName(name: string): string {
+  const clean = name.trim().replace(/\s+/g, " ");
+  if (!clean) return "Unnamed";
+  return clean
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/** Identity of a person: name (case-insensitive) plus email when one is recorded. */
+function personKey(record: TrainingRecord): string {
+  const name = record.participant.trim().replace(/\s+/g, " ").toLowerCase();
+  const email = record.email.trim().toLowerCase();
+  return email ? `${name}|${email}` : name;
+}
+
+function courseName(record: TrainingRecord): string {
+  return record.course.trim().replace(/\s+/g, " ") || "Unspecified course";
+}
+
+const STATUS_RANK: Record<StatusKey, number> = { completed: 2, inProgress: 1, notCompleted: 0 };
+
+/**
+ * Keeps one row per person per course. When the same pair is uploaded more than
+ * once, the furthest-along row wins (completed > in progress > not completed),
+ * then the higher score.
+ */
+export function dedupeRecords(records: TrainingRecord[]): TrainingRecord[] {
+  const best = new Map<string, TrainingRecord>();
+  for (const r of records) {
+    const key = `${personKey(r)}||${courseName(r).toLowerCase()}`;
+    const current = best.get(key);
+    if (!current) {
+      best.set(key, r);
+      continue;
+    }
+    const rank = STATUS_RANK[statusKey(r.status)] - STATUS_RANK[statusKey(current.status)];
+    if (rank > 0 || (rank === 0 && (r.score ?? -1) > (current.score ?? -1))) {
+      best.set(key, r);
+    }
+  }
+  return [...best.values()];
+}
+
+function byName(a: { participant: string }, b: { participant: string }): number {
+  return a.participant.localeCompare(b.participant, undefined, { numeric: true });
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < items.length; i += size) out.push(items.slice(i, i + size));
+  return out;
+}
+
+export function coursesText(user: StatusUser): string {
+  return user.courses.map((c) => c.course).join(", ");
+}
+
+export function scoresText(user: StatusUser): string {
+  return user.courses.map((c) => formatScore(c.score)).join(" · ");
+}
+
+const STATUS_PAGE_UNITS = 13.5;
+const BLOCK_HEAD_UNITS = 2.3;
+const BLOCK_GAP_UNITS = 0.6;
+const CHARS_PER_LINE = 96;
+
+/** Lines a person's row needs once their course list wraps. */
+export function rowUnits(user: StatusUser): number {
+  return Math.max(1, Math.ceil(coursesText(user).length / CHARS_PER_LINE));
+}
+
+/**
+ * Flows the three status lists across slides. Every person is listed, an empty
+ * group still gets its heading, and a long group continues on the next slide.
+ */
+export function statusPages(metrics: Pick<Metrics, "statusGroups">): StatusPage[] {
+  const pages: StatusBlock[][] = [[]];
+  let remaining = STATUS_PAGE_UNITS;
+  const current = () => pages[pages.length - 1]!;
+  const newPage = () => {
+    pages.push([]);
+    remaining = STATUS_PAGE_UNITS;
+  };
+
+  for (const group of metrics.statusGroups) {
+    if (group.users.length === 0) {
+      const need = BLOCK_HEAD_UNITS + 1;
+      if (remaining < need) newPage();
+      current().push({ group, rows: [], start: 0, continued: false });
+      remaining -= need + BLOCK_GAP_UNITS;
+      continue;
+    }
+    let offset = 0;
+    while (offset < group.users.length) {
+      const firstUnits = rowUnits(group.users[offset]!);
+      const restUnits = group.users.slice(offset).reduce((sum, u) => sum + rowUnits(u), 0);
+      const fitsHere = BLOCK_HEAD_UNITS + restUnits <= remaining;
+      const fitsFresh = BLOCK_HEAD_UNITS + restUnits <= STATUS_PAGE_UNITS;
+      const tooTight = remaining < BLOCK_HEAD_UNITS + Math.max(firstUnits, 4);
+      // Keep a list together when a fresh slide can hold all of it.
+      if (current().length > 0 && !fitsHere && (fitsFresh || tooTight)) newPage();
+      let space = remaining - BLOCK_HEAD_UNITS;
+      let take = 0;
+      while (offset + take < group.users.length) {
+        const units = rowUnits(group.users[offset + take]!);
+        if (units > space && take > 0) break;
+        space -= units;
+        take += 1;
+        if (space <= 0) break;
+      }
+      current().push({
+        group,
+        rows: group.users.slice(offset, offset + take),
+        start: offset,
+        continued: offset > 0,
+      });
+      offset += take;
+      remaining = space - BLOCK_GAP_UNITS;
+    }
+  }
+
+  const filled = pages.filter((blocks) => blocks.length > 0);
+  return filled.map((blocks, index) => ({ blocks, index, total: filled.length }));
+}
+
+export const COURSES_PER_PAGE = 5;
+export const PARTICIPANTS_PER_PAGE = 11;
+
+export function coursePages(metrics: Pick<Metrics, "courses">): CourseStat[][] {
+  return chunk(metrics.courses, COURSES_PER_PAGE);
+}
+
+export function participantPages(metrics: Pick<Metrics, "participants">): ParticipantStat[][] {
+  return chunk(metrics.participants, PARTICIPANTS_PER_PAGE);
 }
 
 export function computeMetrics(records: TrainingRecord[], passMark = 80): Metrics {
-  const valid = records.filter((r) => r.course.trim() !== "" || r.participant.trim() !== "");
+  const usable = records.filter((r) => r.course.trim() !== "" || r.participant.trim() !== "");
+  const valid = dedupeRecords(usable);
   const total = valid.length;
+  const nameOf = (r: TrainingRecord) => displayName(r.participant);
 
   const courseMap = new Map<string, TrainingRecord[]>();
   for (const r of valid) {
-    const key = r.course.trim() || "Unspecified course";
+    const key = courseName(r);
     const list = courseMap.get(key);
     if (list) list.push(r);
     else courseMap.set(key, [r]);
   }
 
+  const countStatus = (rows: TrainingRecord[], key: StatusKey) =>
+    rows.filter((r) => statusKey(r.status) === key).length;
+
   const courses: CourseStat[] = [...courseMap.entries()]
     .map(([course, rows]) => {
       const scored = rows.map((r) => r.score).filter((s): s is number => s != null);
+      const done = countStatus(rows, "completed");
       return {
         course,
         count: rows.length,
         pct: pctOf(rows.length, total),
-        participants: new Set(rows.map((r) => r.participant.trim().toLowerCase())).size,
+        participants: new Set(rows.map(personKey)).size,
         avgScore: scored.length
           ? round(scored.reduce((a, b) => a + b, 0) / scored.length, 1)
           : null,
+        completed: done,
+        inProgress: countStatus(rows, "inProgress"),
+        notCompleted: countStatus(rows, "notCompleted"),
+        completionRate: pctOf(done, rows.length),
       };
     })
     .sort((a, b) => b.count - a.count || a.course.localeCompare(b.course));
@@ -222,20 +384,45 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
     tally(valid.map((r) => (r.status.trim() ? r.status.trim() : "Not recorded"))),
     total,
   );
-  const completedUsers = valid
-    .filter((r) => isCompletedStatus(r.status))
-    .map(toCompletionUser)
-    .sort(byUser);
-  const notCompletedUsers = valid
-    .filter((r) => !isCompletedStatus(r.status))
-    .map(toCompletionUser)
-    .sort(byUser);
-  const completed = completedUsers.length;
-  const notCompleted = notCompletedUsers.length;
-  const completionSplit: Bucket[] = [
-    { label: "Completed", count: completed, pct: pctOf(completed, total) },
-    { label: "Not completed", count: notCompleted, pct: pctOf(notCompleted, total) },
-  ];
+
+  const statusGroups: StatusGroup[] = STATUS_ORDER.map((key) => {
+    const rows = valid.filter((r) => statusKey(r.status) === key);
+    const people = new Map<string, StatusUser>();
+    for (const r of rows) {
+      const id = personKey(r);
+      const user = people.get(id) ?? {
+        participant: nameOf(r),
+        department: r.department.trim(),
+        courses: [],
+      };
+      user.courses.push({ course: courseName(r), score: r.score });
+      people.set(id, user);
+    }
+    const users = [...people.values()]
+      .map((u) => ({
+        ...u,
+        courses: [...u.courses].sort((a, b) => a.course.localeCompare(b.course)),
+      }))
+      .sort(byName);
+    return {
+      key,
+      label: STATUS_LABELS[key],
+      assignments: rows.length,
+      pct: pctOf(rows.length, total),
+      users,
+    };
+  });
+
+  const groupCount = (key: StatusKey) => statusGroups.find((g) => g.key === key)?.assignments ?? 0;
+  const completed = groupCount("completed");
+  const inProgress = groupCount("inProgress");
+  const notCompleted = groupCount("notCompleted");
+  const completionSplit: StatusBucket[] = statusGroups.map((g) => ({
+    key: g.key,
+    label: g.label,
+    count: g.assignments,
+    pct: g.pct,
+  }));
 
   const scoredRows = valid.filter((r) => r.score != null && r.score >= 0 && r.score <= 100);
   const scores = scoredRows.map((r) => r.score as number);
@@ -282,43 +469,39 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
     tally(valid.map((r) => r.department.trim() || "Unassigned")),
     total,
   );
-  const byParticipant = toBuckets(
-    tally(valid.map((r) => r.participant.trim() || "Unnamed")),
-    total,
-  );
+  const byParticipant = toBuckets(tally(valid.map(nameOf)), total);
 
   const participantMap = new Map<string, TrainingRecord[]>();
   for (const r of valid) {
-    const key = r.participant.trim() || "Unnamed";
+    const key = personKey(r);
     const list = participantMap.get(key);
     if (list) list.push(r);
     else participantMap.set(key, [r]);
   }
-  const participants: ParticipantStat[] = [...participantMap.entries()]
-    .map(([participant, rows]) => {
+  const participants: ParticipantStat[] = [...participantMap.values()]
+    .map((rows) => {
       const scored = rows.map((r) => r.score).filter((s): s is number => s != null);
       return {
-        participant,
+        participant: nameOf(rows[0]!),
         department: rows.find((r) => r.department.trim())?.department.trim() ?? "",
         enrolments: rows.length,
-        completed: rows.filter((r) => isCompletedStatus(r.status)).length,
+        completed: countStatus(rows, "completed"),
+        inProgress: countStatus(rows, "inProgress"),
+        notCompleted: countStatus(rows, "notCompleted"),
         avgScore: scored.length
           ? round(scored.reduce((a, b) => a + b, 0) / scored.length, 1)
           : null,
         bestScore: scored.length ? round(Math.max(...scored), 2) : null,
         lowestScore: scored.length ? round(Math.min(...scored), 2) : null,
         passed: scored.filter((s) => s >= passMark).length,
-        courses: [...new Set(rows.map((r) => r.course.trim() || "Unspecified course"))],
+        courses: [...new Set(rows.map(courseName))],
       };
     })
-    .sort(
-      (a, b) =>
-        (b.avgScore ?? -1) - (a.avgScore ?? -1) || a.participant.localeCompare(b.participant),
-    );
+    .sort(byName);
 
   const performers: PerformerStat[] = scoredRows.map((r) => ({
-    participant: r.participant.trim() || "Unnamed",
-    course: r.course.trim() || "Unspecified course",
+    participant: nameOf(r),
+    course: courseName(r),
     score: r.score as number,
   }));
 
@@ -330,18 +513,17 @@ export function computeMetrics(records: TrainingRecord[], passMark = 80): Metric
 
   return {
     totalEnrolments: total,
-    uniqueParticipants: new Set(
-      valid.map((r) => r.participant.trim().toLowerCase()).filter(Boolean),
-    ).size,
+    uniqueParticipants: participantMap.size,
     courseCount: courses.length,
     courses,
     statuses,
     completed,
+    inProgress,
     notCompleted,
     completionRate: pctOf(completed, total),
     completionSplit,
-    completedUsers,
-    notCompletedUsers,
+    statusGroups,
+    duplicatesRemoved: usable.length - valid.length,
     assessed,
     passed,
     failed,

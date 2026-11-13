@@ -6,7 +6,18 @@ import {
   ShareChart,
   TrendChart,
 } from "@/components/report/ReportCharts";
-import { completionPages, type CompletionPage, type CompletionUser } from "@/calculations/metrics";
+import {
+  coursePages,
+  coursesText,
+  formatScore,
+  participantPages,
+  scoresText,
+  statusPages,
+  type CourseStat,
+  type ParticipantStat,
+  type StatusKey,
+  type StatusPage,
+} from "@/calculations/metrics";
 import { hex, seriesColor } from "@/reports/theme";
 import type { ReportModel } from "@/reports/model";
 import type { SectionKey } from "@/types/report";
@@ -100,27 +111,86 @@ function CoverSlide({ model }: { model: ReportModel }) {
   );
 }
 
+const statusHex = (model: ReportModel, key: StatusKey) => hex(model.palette.status[key]);
+const statusSoftHex = (model: ReportModel, key: StatusKey) =>
+  hex(model.palette.status[`${key}Soft`]);
+const pageSuffix = (index: number, total: number) =>
+  total > 1 ? ` · page ${index + 1} of ${total}` : "";
+
 function SummarySlide({ model }: { model: ReportModel }) {
+  const m = model.metrics;
+  const c = colors(model);
   return (
     <SlideFrame className="flex flex-col">
       <SlideHeader title="Executive Summary" subtitle={model.config.summaryStrap} model={model} />
-      <div className="mt-[3cqw] grid flex-1 grid-cols-4 gap-[1.8cqw]">
-        {model.kpis.map((kpi, i) => (
+      <div className="mt-[2.4cqw] grid grid-cols-4 gap-[2cqw]">
+        {model.kpis.map((kpi) => (
           <div
-            key={`${kpi.value}-${i}`}
-            className="flex flex-col items-center justify-center rounded-[1.6cqw] px-[1.4cqw] py-[2.2cqw] text-center"
-            style={{ backgroundColor: hex(colors(model).card) }}
+            key={kpi.label}
+            className="rounded-[1cqw] px-[2cqw] py-[2cqw]"
+            style={{
+              backgroundColor:
+                kpi.tone === "neutral" ? hex(c.card) : statusSoftHex(model, kpi.tone),
+            }}
           >
             <span
-              className="mb-[1.4cqw] block h-[3.4cqw] w-[3.4cqw] rounded-full"
+              className="mb-[1.2cqw] block h-[0.6cqw] w-[5cqw]"
               style={{
-                backgroundColor: hex(
-                  kpi.tone === "accent" ? colors(model).accent : colors(model).ink,
-                ),
+                backgroundColor: kpi.tone === "neutral" ? hex(c.ink) : statusHex(model, kpi.tone),
               }}
             />
-            <p className="slide-kpi">{kpi.value}</p>
-            <p className="slide-body mt-[1cqw]">{kpi.caption}</p>
+            <p className="slide-kpi tabular-nums" style={{ fontSize: "4.7cqw" }}>
+              {kpi.value}
+            </p>
+            <p
+              className="mt-[1.2cqw] font-semibold"
+              style={{ fontSize: "1.5cqw", color: hex(c.ink) }}
+            >
+              {kpi.label}
+            </p>
+            <p className="slide-body" style={{ fontSize: "1.3cqw" }}>
+              {kpi.caption}
+            </p>
+          </div>
+        ))}
+      </div>
+      <p
+        className="mt-[2.6cqw] font-display font-bold"
+        style={{ fontSize: "1.9cqw", color: hex(c.ink) }}
+      >
+        Overall assignment status
+      </p>
+      <div
+        className="mt-[1cqw] flex h-[4cqw] w-full overflow-hidden"
+        style={{ backgroundColor: hex(c.card) }}
+      >
+        {m.completionSplit
+          .filter((part) => part.count > 0)
+          .map((part) => (
+            <div
+              key={part.key}
+              className="flex items-center justify-center font-bold"
+              style={{
+                width: `${(part.count / Math.max(m.totalEnrolments, 1)) * 100}%`,
+                backgroundColor: statusHex(model, part.key),
+                color: hex(c.white),
+                fontSize: "1.4cqw",
+              }}
+            >
+              {part.count / Math.max(m.totalEnrolments, 1) >= 0.066 ? `${part.pct}%` : ""}
+            </div>
+          ))}
+      </div>
+      <div className="mt-[1.6cqw] grid grid-cols-3">
+        {m.completionSplit.map((part) => (
+          <div key={part.key} className="flex items-center gap-[0.8cqw]">
+            <span
+              className="h-[1.6cqw] w-[1.6cqw] shrink-0"
+              style={{ backgroundColor: statusHex(model, part.key) }}
+            />
+            <span className="slide-body">
+              <b style={{ color: hex(c.ink) }}>{part.count}</b> {part.label} ({part.pct}%)
+            </span>
           </div>
         ))}
       </div>
@@ -199,11 +269,7 @@ function TrendsSlide({ model }: { model: ReportModel }) {
         <div className="flex min-h-0 flex-col">
           <p className="slide-body font-semibold">Enrolments by department</p>
           <div className="min-h-0 flex-1">
-            <ShareChart
-              data={m.byDepartment.slice(0, 6)}
-              variant="bar"
-              palette={model.palette}
-            />
+            <ShareChart data={m.byDepartment.slice(0, 6)} variant="bar" palette={model.palette} />
           </div>
         </div>
       </div>
@@ -269,11 +335,15 @@ function Stat({ value, label, model }: { value: string; label: string; model: Re
 function AssessmentSlide({ model }: { model: ReportModel }) {
   const m = model.metrics;
   const data = m.distribution.map((d) => ({ label: d.label, count: d.count, pct: d.pct }));
-  const fmt = (n: number | null) => (n == null ? "—" : `${n}%`);
+  const fmt = formatScore;
   return (
     <SlideFrame className="flex flex-col">
       <SlideHeader
-        title={model.period ? `${model.period} — ${model.config.assessmentTitle}` : model.config.assessmentTitle}
+        title={
+          model.period
+            ? `${model.period} — ${model.config.assessmentTitle}`
+            : model.config.assessmentTitle
+        }
         subtitle={`${m.assessed} assessed · ${m.passed} passed · ${m.failed} below the ${m.passMark}% threshold`}
         model={model}
       />
@@ -284,7 +354,11 @@ function AssessmentSlide({ model }: { model: ReportModel }) {
           <Stat model={model} value={fmt(m.average)} label="Average score" />
           <Stat model={model} value={`${m.passRate}%`} label="Pass rate" />
           <Stat model={model} value={String(m.assessed)} label="Assessed" />
-          <Stat model={model} value={`${m.passed} / ${m.failed}`} label="Passed / below threshold" />
+          <Stat
+            model={model}
+            value={`${m.passed} / ${m.failed}`}
+            label="Passed / below threshold"
+          />
         </div>
         <div className="flex min-h-0 flex-col">
           <p className="slide-body font-semibold">Score distribution</p>
@@ -297,7 +371,8 @@ function AssessmentSlide({ model }: { model: ReportModel }) {
           </div>
           {m.lowPerformers.length > 0 && m.lowPerformers[0] ? (
             <p className="slide-body mt-[0.8cqw] italic">
-              Note: lowest result is {m.lowPerformers[0].participant} at {m.lowPerformers[0].score}%
+              Note: lowest result is {m.lowPerformers[0].participant} at{" "}
+              {formatScore(m.lowPerformers[0].score)}
               in {m.lowPerformers[0].course} — flagged for a short refresher.
             </p>
           ) : null}
@@ -307,235 +382,394 @@ function AssessmentSlide({ model }: { model: ReportModel }) {
   );
 }
 
-function UserTable({
-  title,
-  total,
-  rows,
-  start,
+const cellText = { fontSize: "1.25cqw", lineHeight: 1.3 } as const;
+
+function HeadRow({
   model,
+  columns,
+  labels,
 }: {
-  title: string;
-  total: number;
-  rows: CompletionUser[];
-  start: number;
   model: ReportModel;
+  columns: string;
+  labels: string[];
 }) {
   const c = colors(model);
-  const columns = "grid-cols-[0.4fr_1.5fr_1.5fr]";
   return (
-    <div className="min-h-0">
-      <div className="mb-[0.7cqw] flex items-baseline gap-[0.8cqw]">
-        <p className="font-display font-bold" style={{ fontSize: "1.85cqw", color: hex(c.ink) }}>
-          {title}
-        </p>
-        <p className="slide-body font-semibold tabular-nums" style={{ color: hex(c.ink) }}>
-          {total}
-        </p>
-      </div>
-      <div
-        className={cn(
-          "slide-body grid gap-[0.6cqw] pb-[0.4cqw] font-semibold",
-          columns,
-        )}
-        style={{ color: hex(c.ink), borderBottom: `1px solid ${hex(c.card)}` }}
-      >
-        <span>#</span>
-        <span>Participant</span>
-        <span>Course</span>
-      </div>
-      {rows.length === 0 && total === 0 ? (
-        <div
-          className={cn("slide-body grid items-center gap-[0.6cqw] rounded-[0.45cqw] px-[0.35cqw] py-[0.45cqw]", columns)}
-          style={{ backgroundColor: hex(c.card) }}
+    <div
+      className={cn("grid items-center font-bold", columns)}
+      style={{ ...cellText, backgroundColor: hex(c.ink), color: hex(c.white), minHeight: "2.6cqw" }}
+    >
+      {labels.map((label, i) => (
+        <span
+          key={label}
+          className={cn(
+            "px-[0.8cqw]",
+            i > 0 && label !== "Employee" && !label.startsWith("Course(s)") && "text-center",
+          )}
         >
-          <span />
-          <span className="tabular-nums" style={{ color: hex(c.ink) }}>
-            0
-          </span>
-          <span />
-        </div>
-      ) : (
-        rows.map((user, i) => (
-          <div
-            key={`${user.participant}-${user.course}-${user.status}-${start + i}`}
-            className={cn(
-              "slide-body grid items-center gap-[0.6cqw] rounded-[0.45cqw] px-[0.35cqw] py-[0.34cqw]",
-              columns,
-            )}
-            style={{ backgroundColor: i % 2 === 0 ? hex(c.card) : "transparent" }}
-          >
-            <span className="tabular-nums">{start + i + 1}</span>
-            <span className="truncate font-medium" style={{ color: hex(c.ink) }}>
-              {user.participant}
-            </span>
-            <span className="truncate">{user.course}</span>
-          </div>
-        ))
-      )}
+          {label}
+        </span>
+      ))}
     </div>
   );
 }
 
-function CompletionSlide({ model, page }: { model: ReportModel; page: CompletionPage }) {
+function Count({ value, tone, model }: { value: number; tone?: StatusKey; model: ReportModel }) {
+  const active = tone != null && value > 0;
+  return (
+    <span
+      className={cn("px-[0.8cqw] text-center tabular-nums", active && "font-bold")}
+      style={active ? { color: statusHex(model, tone) } : undefined}
+    >
+      {value}
+    </span>
+  );
+}
+
+function CoursesSlide({
+  model,
+  rows,
+  index,
+  total,
+}: {
+  model: ReportModel;
+  rows: CourseStat[];
+  index: number;
+  total: number;
+}) {
   const m = model.metrics;
   const c = colors(model);
-  const continued = page.total > 1 ? ` · page ${page.index + 1} of ${page.total}` : "";
-  const chartSlices = m.completionSplit
-    .map((item, i) => ({ ...item, color: hex(sc(model, i)) }))
-    .filter((item) => item.count > 0);
-  const tables = [
-    page.completed.length > 0 || (m.completed === 0 && page.showChart)
-      ? {
-          key: "completed",
-          title: "Completed users",
-          total: m.completed,
-          rows: page.completed,
-          start: page.completedStart,
-        }
-      : null,
-    page.notCompleted.length > 0 || (m.notCompleted === 0 && page.showChart && m.completed === 0)
-      ? {
-          key: "not-completed",
-          title: "Not completed users",
-          total: m.notCompleted,
-          rows: page.notCompleted,
-          start: page.notCompletedStart,
-        }
-      : null,
-  ].filter((table) => table != null);
-
+  const columns = "grid-cols-[2.7fr_0.9fr_1fr_1fr_1.15fr_1.2fr_1.05fr]";
+  const max = Math.max(...rows.map((r) => r.count), 1);
+  const keys: StatusKey[] = ["completed", "inProgress", "notCompleted"];
   return (
     <SlideFrame className="flex flex-col">
       <SlideHeader
-        title="Completed and not completed"
-        subtitle={`${m.completed} completed · ${m.notCompleted} not completed${continued}`}
+        title="Course Breakdown"
+        subtitle={`Status of ${m.totalEnrolments} course assignments across ${m.courseCount} ${
+          m.courseCount === 1 ? "course" : "courses"
+        }${pageSuffix(index, total)}`}
         model={model}
       />
-      {page.showChart ? (
-        <div className="mt-[1.5cqw] grid h-[18cqw] grid-cols-[0.9fr_1.15fr] items-center gap-[2.4cqw]">
-          <div className="h-full min-h-0">
-            {chartSlices.length > 0 ? (
-              <ShareChart
-                data={chartSlices}
-                colors={chartSlices.map((slice) => slice.color)}
-                variant="donut"
-                palette={model.palette}
-              />
-            ) : (
-              <div className="flex h-full items-center justify-center">
-                <p className="slide-kpi" style={{ fontSize: "4cqw" }}>
-                  0
-                </p>
-              </div>
-            )}
+      <div className="mt-[1.6cqw]" style={{ border: `1px solid ${hex(c.card)}` }}>
+        <HeadRow
+          model={model}
+          columns={columns}
+          labels={[
+            "Course",
+            "Assigned",
+            "Completed",
+            "In progress",
+            "Not completed",
+            "Completion rate",
+            "Avg score",
+          ]}
+        />
+        {rows.map((r, i) => (
+          <div
+            key={r.course}
+            className={cn("slide-body grid items-center", columns)}
+            style={{
+              ...cellText,
+              minHeight: "2.6cqw",
+              backgroundColor: i % 2 ? hex(c.card) : undefined,
+            }}
+          >
+            <span className="truncate px-[0.8cqw] font-bold" style={{ color: hex(c.ink) }}>
+              {r.course}
+            </span>
+            <Count value={r.count} model={model} />
+            <Count value={r.completed} tone="completed" model={model} />
+            <Count value={r.inProgress} tone="inProgress" model={model} />
+            <Count value={r.notCompleted} tone="notCompleted" model={model} />
+            <span className="text-center font-bold tabular-nums" style={{ color: hex(c.ink) }}>
+              {r.completionRate}%
+            </span>
+            <span className="text-center tabular-nums">{formatScore(r.avgScore)}</span>
           </div>
-          <div className="flex flex-col justify-center gap-[1cqw]">
-            {m.completionSplit.map((item, i) => (
-              <div
-                key={item.label}
-                className="flex items-center gap-[1cqw] rounded-[1cqw] px-[1.3cqw] py-[1cqw]"
-                style={{ backgroundColor: hex(c.card) }}
-              >
-                <span
-                  className="h-[1.5cqw] w-[1.5cqw] shrink-0 rounded-[0.3cqw]"
-                  style={{ backgroundColor: hex(sc(model, i)) }}
-                />
-                <span className="slide-body min-w-0 flex-1 truncate" style={{ color: hex(c.ink) }}>
-                  {item.label}
-                </span>
-                <span className="slide-kpi tabular-nums" style={{ fontSize: "2.8cqw" }}>
-                  {item.count}
-                </span>
-                <span
-                  className="slide-body w-[6.5cqw] text-right font-semibold tabular-nums"
-                  style={{ color: hex(c.ink) }}
-                >
-                  {item.pct}%
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      ) : null}
-      <div className={cn("mt-[1.4cqw] grid flex-1 gap-[2.2cqw]", tables.length > 1 && "grid-cols-2")}>
-        {tables.map((table) => (
-          <UserTable
-            key={table.key}
-            title={table.title}
-            total={table.total}
-            rows={table.rows}
-            start={table.start}
-            model={model}
-          />
         ))}
+        {index === total - 1 && m.courses.length > 0 ? (
+          <div
+            className={cn("grid items-center font-bold", columns)}
+            style={{
+              ...cellText,
+              minHeight: "2.6cqw",
+              backgroundColor: hex(c.card),
+              color: hex(c.ink),
+            }}
+          >
+            <span className="px-[0.8cqw]">Total</span>
+            <span className="text-center tabular-nums">{m.totalEnrolments}</span>
+            <span className="text-center tabular-nums">{m.completed}</span>
+            <span className="text-center tabular-nums">{m.inProgress}</span>
+            <span className="text-center tabular-nums">{m.notCompleted}</span>
+            <span className="text-center tabular-nums">{m.completionRate}%</span>
+            <span className="text-center tabular-nums">{formatScore(m.average)}</span>
+          </div>
+        ) : null}
+      </div>
+      <div className="mt-[1.6cqw] flex min-h-0 flex-1 flex-col justify-center gap-[0.7cqw]">
+        {rows.map((r) => (
+          <div key={r.course} className="grid grid-cols-[2.2fr_6.8fr] items-center gap-[1cqw]">
+            <span className="slide-body truncate text-right" style={cellText}>
+              {r.course}
+            </span>
+            <div className="flex h-[1.9cqw]" style={{ width: `${(r.count / max) * 100}%` }}>
+              {keys
+                .filter((key) => r[key] > 0)
+                .map((key) => (
+                  <div
+                    key={key}
+                    className="flex items-center justify-center font-bold"
+                    style={{
+                      width: `${(r[key] / r.count) * 100}%`,
+                      backgroundColor: statusHex(model, key),
+                      color: hex(c.white),
+                      fontSize: "1.2cqw",
+                    }}
+                  >
+                    {r[key]}
+                  </div>
+                ))}
+            </div>
+          </div>
+        ))}
+        <div className="mt-[0.4cqw] flex justify-center gap-[2.4cqw]">
+          {m.completionSplit.map((part) => (
+            <span
+              key={part.key}
+              className="slide-body flex items-center gap-[0.6cqw]"
+              style={cellText}
+            >
+              <span
+                className="h-[1.1cqw] w-[1.1cqw]"
+                style={{ backgroundColor: statusHex(model, part.key) }}
+              />
+              {part.label}
+            </span>
+          ))}
+        </div>
       </div>
     </SlideFrame>
   );
 }
 
-function ParticipantsSlide({ model }: { model: ReportModel }) {
+function StatusOverviewSlide({ model }: { model: ReportModel }) {
   const m = model.metrics;
-  const rows = m.participants.slice(0, 12);
-  const chartData = m.participants
-    .filter((p) => p.avgScore != null)
-    .slice(0, 8)
-    .map((p) => ({ label: p.participant, count: p.avgScore ?? 0, pct: p.avgScore ?? 0 }));
+  const c = colors(model);
+  const slices = m.completionSplit.filter((item) => item.count > 0);
+  return (
+    <SlideFrame className="flex flex-col">
+      <SlideHeader
+        title="Training Status Overview"
+        subtitle={`${m.completed} completed · ${m.inProgress} in progress · ${m.notCompleted} not completed`}
+        model={model}
+      />
+      <div className="mt-[1.5cqw] grid min-h-0 flex-1 grid-cols-[0.9fr_1fr] items-center gap-[3cqw]">
+        <div className="h-full max-h-[36cqw] min-h-0">
+          {slices.length > 0 ? (
+            <ShareChart
+              data={slices}
+              colors={slices.map((slice) => statusHex(model, slice.key))}
+              variant="donut"
+              palette={model.palette}
+            />
+          ) : (
+            <div className="slide-body flex h-full items-center justify-center">No assignments</div>
+          )}
+        </div>
+        <div className="flex flex-col gap-[1.6cqw]">
+          {m.statusGroups.map((group) => (
+            <div
+              key={group.key}
+              className="flex items-center gap-[1.6cqw] px-[1.8cqw] py-[1.5cqw]"
+              style={{
+                backgroundColor: statusSoftHex(model, group.key),
+                borderLeft: `0.7cqw solid ${statusHex(model, group.key)}`,
+                borderRadius: "0.8cqw",
+              }}
+            >
+              <div className="min-w-0 flex-1">
+                <p
+                  className="font-display font-bold"
+                  style={{ fontSize: "2.2cqw", color: hex(c.ink) }}
+                >
+                  {group.label}
+                </p>
+                <p className="slide-body" style={{ fontSize: "1.3cqw" }}>
+                  {group.users.length} {group.users.length === 1 ? "employee" : "employees"} ·{" "}
+                  {group.pct}% of assignments
+                </p>
+              </div>
+              <p
+                className="slide-kpi tabular-nums"
+                style={{ fontSize: "4.4cqw", color: statusHex(model, group.key) }}
+              >
+                {group.assignments}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    </SlideFrame>
+  );
+}
+
+function StatusDetailSlide({ model, page }: { model: ReportModel; page: StatusPage }) {
   const c = colors(model);
   return (
     <SlideFrame className="flex flex-col">
       <SlideHeader
-        title="Participant Results"
-        subtitle={`${m.uniqueParticipants} people · every name, course load and score from the imported data`}
+        title="Training Status Details"
+        subtitle={`Each employee is listed once per status, with their courses grouped on one row${pageSuffix(page.index, page.total)}`}
         model={model}
       />
-      <div className="mt-[1.6cqw] grid flex-1 grid-cols-[1.35fr_1fr] gap-[2.2cqw]">
-        <div className="min-h-0">
-          <div
-            className="slide-body grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.8fr] gap-[0.6cqw] pb-[0.5cqw] font-semibold"
-            style={{ color: hex(c.ink) }}
-          >
-            <span>Participant</span>
-            <span className="text-right">Courses</span>
-            <span className="text-right">Avg</span>
-            <span className="text-right">Best</span>
-            <span className="text-right">Passed</span>
-          </div>
-          <div className="flex flex-col">
-            {rows.map((p, i) => (
-              <div
-                key={p.participant}
-                className="slide-body grid grid-cols-[1.5fr_0.6fr_0.7fr_0.7fr_0.8fr] items-center gap-[0.6cqw] rounded-[0.5cqw] px-[0.4cqw] py-[0.32cqw]"
-                style={{ backgroundColor: i % 2 === 0 ? hex(c.card) : "transparent" }}
-              >
-                <span className="truncate">{p.participant}</span>
-                <span className="text-right tabular-nums">{p.enrolments}</span>
+      <div className="mt-[1.4cqw] flex flex-col gap-[1.4cqw]">
+        {page.blocks.map((block) => {
+          const { group } = block;
+          const withScore = group.key === "completed";
+          const columns = withScore
+            ? "grid-cols-[0.45fr_2.3fr_4.85fr_1.4fr]"
+            : "grid-cols-[0.45fr_2.3fr_6.25fr]";
+          return (
+            <div key={`${group.key}-${block.start}`}>
+              <div className="mb-[0.6cqw] flex items-center gap-[1.5cqw]">
                 <span
-                  className="text-right font-semibold tabular-nums"
-                  style={{ color: hex(c.ink) }}
+                  className="w-[24cqw] px-[1cqw] py-[0.4cqw] font-bold"
+                  style={{
+                    fontSize: "1.6cqw",
+                    color: hex(c.ink),
+                    backgroundColor: statusSoftHex(model, group.key),
+                    borderLeft: `0.6cqw solid ${statusHex(model, group.key)}`,
+                  }}
                 >
-                  {p.avgScore == null ? "—" : `${p.avgScore}%`}
+                  {group.label}
+                  {block.continued ? " (continued)" : ""}
                 </span>
-                <span className="text-right tabular-nums">
-                  {p.bestScore == null ? "—" : `${p.bestScore}%`}
-                </span>
-                <span className="text-right tabular-nums">
-                  {p.passed}/{p.enrolments}
+                <span className="slide-body" style={{ fontSize: "1.3cqw" }}>
+                  {group.assignments} course{" "}
+                  {group.assignments === 1 ? "assignment" : "assignments"} | {group.users.length}{" "}
+                  {group.users.length === 1 ? "employee" : "employees"}
                 </span>
               </div>
-            ))}
+              <div style={{ border: `1px solid ${hex(c.card)}` }}>
+                <HeadRow
+                  model={model}
+                  columns={columns}
+                  labels={[
+                    "#",
+                    "Employee",
+                    withScore ? "Course(s) completed" : "Course(s) in this status",
+                    ...(withScore ? ["Score"] : []),
+                  ]}
+                />
+                {block.rows.length === 0 ? (
+                  <div className="slide-body px-[4cqw] py-[0.5cqw] italic" style={cellText}>
+                    No course assignments in this status
+                  </div>
+                ) : (
+                  block.rows.map((user, i) => (
+                    <div
+                      key={`${user.participant}-${block.start + i}`}
+                      className={cn("slide-body grid items-center", columns)}
+                      style={{
+                        ...cellText,
+                        minHeight: "2.5cqw",
+                        backgroundColor: i % 2 ? hex(c.card) : undefined,
+                      }}
+                    >
+                      <span className="text-center tabular-nums">{block.start + i + 1}</span>
+                      <span
+                        className="truncate px-[0.8cqw] font-bold"
+                        style={{ color: hex(c.ink) }}
+                      >
+                        {user.participant}
+                      </span>
+                      <span className="px-[0.8cqw]">{coursesText(user)}</span>
+                      {withScore ? (
+                        <span
+                          className="text-center font-bold tabular-nums"
+                          style={{ color: statusHex(model, "completed") }}
+                        >
+                          {scoresText(user)}
+                        </span>
+                      ) : null}
+                    </div>
+                  ))
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </SlideFrame>
+  );
+}
+
+function ParticipantsSlide({
+  model,
+  rows,
+  start,
+  index,
+  total,
+}: {
+  model: ReportModel;
+  rows: ParticipantStat[];
+  start: number;
+  index: number;
+  total: number;
+}) {
+  const m = model.metrics;
+  const c = colors(model);
+  const columns = "grid-cols-[0.45fr_2.75fr_0.95fr_1.05fr_1.05fr_1.2fr_0.8fr_0.75fr]";
+  return (
+    <SlideFrame className="flex flex-col">
+      <SlideHeader
+        title="Employee Training Overview"
+        subtitle={`${m.uniqueParticipants} ${m.uniqueParticipants === 1 ? "employee" : "employees"}, each shown once with all assigned courses${pageSuffix(index, total)}`}
+        model={model}
+      />
+      <div className="mt-[1.6cqw]" style={{ border: `1px solid ${hex(c.card)}` }}>
+        <HeadRow
+          model={model}
+          columns={columns}
+          labels={[
+            "#",
+            "Employee",
+            "Assigned",
+            "Completed",
+            "In progress",
+            "Not completed",
+            "Completion",
+            "Avg score",
+          ]}
+        />
+        {rows.map((p, i) => (
+          <div
+            key={`${p.participant}-${start + i}`}
+            className={cn("slide-body grid items-center", columns)}
+            style={{
+              ...cellText,
+              minHeight: "2.7cqw",
+              backgroundColor: i % 2 ? hex(c.card) : undefined,
+            }}
+          >
+            <span className="text-center tabular-nums">{start + i + 1}</span>
+            <span className="truncate px-[0.8cqw] font-bold" style={{ color: hex(c.ink) }}>
+              {p.participant}
+            </span>
+            <Count value={p.enrolments} model={model} />
+            <Count value={p.completed} tone="completed" model={model} />
+            <Count value={p.inProgress} tone="inProgress" model={model} />
+            <Count value={p.notCompleted} tone="notCompleted" model={model} />
+            <span className="text-center tabular-nums">
+              {Math.round((p.completed / Math.max(p.enrolments, 1)) * 100)}%
+            </span>
+            <span className="text-center font-bold tabular-nums" style={{ color: hex(c.ink) }}>
+              {formatScore(p.avgScore)}
+            </span>
           </div>
-          {m.participants.length > rows.length ? (
-            <p className="slide-body mt-[0.6cqw] italic">
-              + {m.participants.length - rows.length} more participants in the source data
-            </p>
-          ) : null}
-        </div>
-        <div className="flex min-h-0 flex-col">
-          <p className="slide-body font-semibold">Average score by participant</p>
-          <div className="min-h-0 flex-1">
-            <ScoreBarChart data={chartData} palette={model.palette} />
-          </div>
-        </div>
+        ))}
       </div>
     </SlideFrame>
   );
@@ -595,19 +829,27 @@ function ClosingSlide({ model }: { model: ReportModel }) {
   );
 }
 
-const RENDERERS: Record<Exclude<SectionKey, "completion">, (p: { model: ReportModel }) => ReactNode> = {
+const RENDERERS: Record<
+  Exclude<SectionKey, "completion" | "courses" | "participants">,
+  (p: { model: ReportModel }) => ReactNode
+> = {
   cover: CoverSlide,
   summary: SummarySlide,
   enrolment: EnrolmentSlide,
   trends: TrendsSlide,
   insights: InsightsSlide,
   assessment: AssessmentSlide,
-  participants: ParticipantsSlide,
   recommendations: RecommendationsSlide,
   closing: ClosingSlide,
 };
 
-export function ReportDeck({ model, printable = false }: { model: ReportModel; printable?: boolean }) {
+export function ReportDeck({
+  model,
+  printable = false,
+}: {
+  model: ReportModel;
+  printable?: boolean;
+}) {
   const c = model.palette.colors;
   const themeVars = {
     "--color-report-bg": hex(c.bg),
@@ -628,12 +870,47 @@ export function ReportDeck({ model, printable = false }: { model: ReportModel; p
           "overflow-hidden rounded-xl border border-border shadow-sm",
           printable && "print-page rounded-none border-0 shadow-none",
         );
+        const wrap = (id: string, node: ReactNode) => (
+          <div key={id} className={frame}>
+            {node}
+          </div>
+        );
         if (key === "completion") {
-          return completionPages(model.metrics).map((page) => (
-            <div key={`completion-${page.index}`} className={frame}>
-              <CompletionSlide model={model} page={page} />
-            </div>
-          ));
+          return [
+            wrap("status-overview", <StatusOverviewSlide model={model} />),
+            ...statusPages(model.metrics).map((page) =>
+              wrap(`status-${page.index}`, <StatusDetailSlide model={model} page={page} />),
+            ),
+          ];
+        }
+        if (key === "courses") {
+          const pages = coursePages(model.metrics);
+          const list = pages.length > 0 ? pages : [[]];
+          return list.map((rows, i) =>
+            wrap(
+              `courses-${i}`,
+              <CoursesSlide model={model} rows={rows} index={i} total={list.length} />,
+            ),
+          );
+        }
+        if (key === "participants") {
+          const pages = participantPages(model.metrics);
+          const list = pages.length > 0 ? pages : [[]];
+          let start = 0;
+          return list.map((rows, i) => {
+            const node = wrap(
+              `participants-${i}`,
+              <ParticipantsSlide
+                model={model}
+                rows={rows}
+                start={start}
+                index={i}
+                total={list.length}
+              />,
+            );
+            start += rows.length;
+            return node;
+          });
         }
         const Slide = RENDERERS[key];
         return [

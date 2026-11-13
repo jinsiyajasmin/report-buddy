@@ -63,6 +63,7 @@ export type SectionKey =
   | "cover"
   | "summary"
   | "enrolment"
+  | "courses"
   | "completion"
   | "trends"
   | "insights"
@@ -75,11 +76,12 @@ export const SECTION_LABELS: Record<SectionKey, string> = {
   cover: "Cover",
   summary: "Executive Summary",
   enrolment: "Enrolment Overview",
-  completion: "Completed & not completed",
+  courses: "Course Breakdown",
+  completion: "Training Status Lists",
   trends: "Enrolment Trends & Departments",
   insights: "What the Numbers Tell Us",
   assessment: "Assessment Results",
-  participants: "Participant Results",
+  participants: "Employee Training Overview",
   recommendations: "Key Takeaways & Recommendations",
   closing: "Thank You",
 };
@@ -122,13 +124,13 @@ export interface SavedReport {
 export function defaultConfig(): ReportConfig {
   return {
     theme: "corporate",
-    title: "Training Performance Report",
-    subtitle: "Candidate Enrolment & Assessment Insights",
+    title: "Training Progress Report",
+    subtitle: "Enrolment, Completion & Assessment Status",
     preparedFor: "Senior Leadership Team",
     presenter: "",
     periodOverride: "",
     passMark: 80,
-    summaryStrap: "A snapshot of safety training activity and outcomes",
+    summaryStrap: "Assigned course activity and the latest training status",
     enrolmentTitle: "Candidate Enrolment Overview",
     assessmentTitle: "Assessment Results",
     closingTitle: "Thank You",
@@ -139,6 +141,7 @@ export function defaultConfig(): ReportConfig {
       cover: true,
       summary: true,
       enrolment: true,
+      courses: true,
       completion: true,
       trends: true,
       insights: true,

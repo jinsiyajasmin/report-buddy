@@ -16,12 +16,23 @@ export interface PaletteColors {
   white: string;
 }
 
+/** Status colours: solid for marks and text, soft for card tints. */
+export interface StatusColors {
+  completed: string;
+  inProgress: string;
+  notCompleted: string;
+  completedSoft: string;
+  inProgressSoft: string;
+  notCompletedSoft: string;
+}
+
 export interface Palette {
   key: ReportTheme;
   label: string;
   description: string;
   colors: PaletteColors;
   series: string[];
+  status: StatusColors;
 }
 
 export const THEMES: Record<ReportTheme, Palette> = {
@@ -38,6 +49,14 @@ export const THEMES: Record<ReportTheme, Palette> = {
       white: "FFFFFF",
     },
     series: ["C8102E", "1F2E63", "3B4E9B", "7183C4", "A7B3DC", "C9CEDF", "E4573D"],
+    status: {
+      completed: "1F7A4D",
+      inProgress: "B7791F",
+      notCompleted: "B3394A",
+      completedSoft: "E3F1E9",
+      inProgressSoft: "FBF0DA",
+      notCompletedSoft: "F8E4E7",
+    },
   },
   midnight: {
     key: "midnight",
@@ -52,6 +71,14 @@ export const THEMES: Record<ReportTheme, Palette> = {
       white: "0F1B2D",
     },
     series: ["2FD3B6", "4C8DF6", "8B7BF0", "F2B33D", "6FE0C4", "9CC2FF", "E4657A"],
+    status: {
+      completed: "34D399",
+      inProgress: "FBBF24",
+      notCompleted: "F87171",
+      completedSoft: "173B3A",
+      inProgressSoft: "3A3524",
+      notCompletedSoft: "40283A",
+    },
   },
   sandstone: {
     key: "sandstone",
@@ -66,6 +93,14 @@ export const THEMES: Record<ReportTheme, Palette> = {
       white: "FFFFFF",
     },
     series: ["B85042", "A7754A", "6F7F5C", "D89B5B", "8C5A4A", "C9B49A", "5C6E63"],
+    status: {
+      completed: "5B7F4F",
+      inProgress: "C0842A",
+      notCompleted: "B85042",
+      completedSoft: "E4ECDB",
+      inProgressSoft: "F6E7C9",
+      notCompletedSoft: "F3D9D3",
+    },
   },
 };
 

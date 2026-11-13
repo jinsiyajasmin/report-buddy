@@ -1,5 +1,16 @@
 import PptxGenJS from "pptxgenjs";
-import { completionPages, type CompletionUser } from "@/calculations/metrics";
+import {
+  coursePages,
+  coursesText,
+  formatScore,
+  participantPages,
+  rowUnits,
+  scoresText,
+  statusPages,
+  STATUS_LABELS,
+  STATUS_ORDER,
+  type StatusKey,
+} from "@/calculations/metrics";
 import type { ReportModel } from "@/reports/model";
 import type { PaletteColors } from "@/reports/theme";
 
@@ -27,21 +38,19 @@ function addLogo(slide: PptxGenJS.Slide, model: ReportModel, big = false) {
   });
 }
 
-function heading(
-  slide: PptxGenJS.Slide,
-  C: PaletteColors,
-  title: string,
-  subtitle?: string,
-) {
+function heading(slide: PptxGenJS.Slide, C: PaletteColors, title: string, subtitle?: string) {
+  // Long titles step down a size so they stay on one line above the subtitle.
+  const size = title.length > 40 ? 20 : title.length > 30 ? 23 : 28;
   slide.addText(title, {
     x: 0.5,
     y: 0.32,
-    w: 7.4,
+    w: 7.6,
     h: 0.6,
-    fontSize: 28,
+    fontSize: size,
     bold: true,
     color: C.ink,
     fontFace: "Georgia",
+    valign: "middle",
   });
   if (subtitle) {
     slide.addText(subtitle, {
@@ -55,7 +64,8 @@ function heading(
   }
 }
 
-export async function exportPptx(model: ReportModel, fileName: string): Promise<void> {
+/** Builds the deck in memory. Kept separate from the download so it can be tested. */
+export function buildPptx(model: ReportModel): PptxGenJS {
   const pptx = new PptxGenJS();
   pptx.layout = "LAYOUT_16x9";
   pptx.author = model.company?.name ?? "Training Report Builder";
@@ -66,6 +76,73 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
   const SERIES = model.palette.series;
   const seriesColor = (i: number) => SERIES[i % SERIES.length] ?? SERIES[0]!;
   const bg = { color: C.bg };
+  const S = model.palette.status;
+  const soft = (key: StatusKey) => S[`${key}Soft`];
+  const footerText = [model.company?.name, model.config.title].filter(Boolean).join("  ·  ");
+  const addFooter = (target: PptxGenJS.Slide) => {
+    target.addShape("line", {
+      x: 0.5,
+      y: 5.27,
+      w: 9,
+      h: 0,
+      line: { color: C.card, width: 0.75 },
+    });
+    target.addText(footerText, {
+      x: 0.5,
+      y: 5.29,
+      w: 7,
+      h: 0.25,
+      fontSize: 8,
+      color: C.muted,
+    });
+    target.slideNumber = {
+      x: 9.0,
+      y: 5.29,
+      w: 0.5,
+      h: 0.25,
+      fontSize: 8,
+      color: C.muted,
+      align: "right",
+    };
+  };
+  /** Extra slide for a section that runs over one page. */
+  const continuationSlide = () => {
+    const extra = pptx.addSlide();
+    extra.background = bg;
+    addFooter(extra);
+    return extra;
+  };
+  const pageSuffix = (index: number, total: number) =>
+    total > 1 ? `  ·  page ${index + 1} of ${total}` : "";
+  const headCell = (
+    text: string,
+    align: "left" | "right" | "center" = "left",
+  ): PptxGenJS.TableCell => ({
+    text,
+    options: {
+      fontSize: 9,
+      bold: true,
+      color: C.white,
+      fill: { color: C.ink },
+      align,
+      valign: "middle",
+    },
+  });
+  const bodyCell = (
+    text: string,
+    row: number,
+    opts: PptxGenJS.TableCellProps = {},
+  ): PptxGenJS.TableCell => ({
+    text,
+    options: {
+      fontSize: 9,
+      color: C.muted,
+      valign: "middle",
+      fill: { color: row % 2 === 0 ? C.bg : C.card },
+      ...opts,
+    },
+  });
+  const tableBorder: PptxGenJS.BorderProps = { type: "solid", pt: 0.5, color: C.card };
   const chartBase = {
     dataLabelColor: C.ink,
     dataLabelFontSize: 9,
@@ -80,6 +157,7 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
   for (const section of model.visibleSections) {
     const slide = pptx.addSlide();
     slide.background = bg;
+    if (section !== "cover" && section !== "closing") addFooter(slide);
 
     if (section === "cover") {
       slide.addText(model.company?.name?.toUpperCase() ?? "", {
@@ -110,10 +188,14 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
         color: C.ink,
         fontFace: "Georgia",
       });
-      slide.addText(
-        `${model.config.subtitle}${model.period ? ` — ${model.period}` : ""}`,
-        { x: 0.6, y: 3.4, w: 8.4, h: 0.5, fontSize: 16, color: C.muted },
-      );
+      slide.addText(`${model.config.subtitle}${model.period ? ` — ${model.period}` : ""}`, {
+        x: 0.6,
+        y: 3.4,
+        w: 8.4,
+        h: 0.5,
+        fontSize: 16,
+        color: C.muted,
+      });
       const footer = [
         model.config.presenter ? `Presented by ${model.config.presenter}` : "",
         model.config.preparedFor ? `Prepared for ${model.config.preparedFor}` : "",
@@ -134,47 +216,125 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
       heading(slide, C, "Executive Summary", model.config.summaryStrap);
       addLogo(slide, model);
       const cardW = 2.1;
-      const gap = 0.22;
-      const startX = (W - (cardW * 4 + gap * 3)) / 2;
+      const gap = 0.2;
       model.kpis.forEach((kpi, i) => {
-        const x = startX + i * (cardW + gap);
+        const x = 0.5 + i * (cardW + gap);
+        const tint = kpi.tone === "neutral" ? C.card : soft(kpi.tone);
+        const strong = kpi.tone === "neutral" ? C.ink : S[kpi.tone];
         slide.addShape("roundRect", {
           x,
-          y: 1.7,
+          y: 1.5,
           w: cardW,
-          h: 3.1,
-          fill: { color: C.card },
-          line: { color: C.card },
-          rectRadius: 0.12,
+          h: 1.8,
+          fill: { color: tint },
+          line: { color: tint },
+          rectRadius: 0.1,
         });
-        slide.addShape("ellipse", {
-          x: x + cardW / 2 - 0.28,
-          y: 2.0,
-          w: 0.56,
-          h: 0.56,
-          fill: { color: kpi.tone === "accent" ? C.accent : C.ink },
+        slide.addShape("rect", {
+          x: x + 0.22,
+          y: 1.72,
+          w: 0.5,
+          h: 0.06,
+          fill: { color: strong },
+          line: { color: strong },
         });
         slide.addText(kpi.value, {
-          x,
-          y: 2.75,
-          w: cardW,
-          h: 0.6,
-          fontSize: 28,
+          x: x + 0.15,
+          y: 1.85,
+          w: cardW - 0.3,
+          h: 0.7,
+          fontSize: 34,
           bold: true,
-          align: "center",
           color: C.ink,
           fontFace: "Georgia",
+          valign: "middle",
+        });
+        slide.addText(kpi.label, {
+          x: x + 0.15,
+          y: 2.55,
+          w: cardW - 0.3,
+          h: 0.3,
+          fontSize: 11,
+          bold: true,
+          color: C.ink,
         });
         slide.addText(kpi.caption, {
           x: x + 0.15,
-          y: 3.4,
+          y: 2.84,
           w: cardW - 0.3,
-          h: 1.2,
-          fontSize: 10,
-          align: "center",
-          valign: "top",
+          h: 0.3,
+          fontSize: 9.5,
           color: C.muted,
         });
+      });
+
+      slide.addText("Overall assignment status", {
+        x: 0.5,
+        y: 3.5,
+        w: 9,
+        h: 0.35,
+        fontSize: 13,
+        bold: true,
+        color: C.ink,
+        fontFace: "Georgia",
+      });
+      const barY = 3.92;
+      const barH = 0.4;
+      if (m.totalEnrolments === 0) {
+        slide.addShape("rect", {
+          x: 0.5,
+          y: barY,
+          w: 9,
+          h: barH,
+          fill: { color: C.card },
+          line: { color: C.card },
+        });
+      } else {
+        let x = 0.5;
+        for (const part of m.completionSplit) {
+          if (part.count === 0) continue;
+          const w = (9 * part.count) / m.totalEnrolments;
+          slide.addShape("rect", {
+            x,
+            y: barY,
+            w,
+            h: barH,
+            fill: { color: S[part.key] },
+            line: { color: S[part.key] },
+          });
+          if (w >= 0.6) {
+            slide.addText(`${part.pct}%`, {
+              x,
+              y: barY,
+              w,
+              h: barH,
+              fontSize: 10,
+              bold: true,
+              align: "center",
+              valign: "middle",
+              color: C.white,
+            });
+          }
+          x += w;
+        }
+      }
+      m.completionSplit.forEach((part, i) => {
+        const x = 0.5 + i * 3;
+        slide.addShape("rect", {
+          x,
+          y: 4.56,
+          w: 0.16,
+          h: 0.16,
+          fill: { color: S[part.key] },
+          line: { color: S[part.key] },
+        });
+        slide.addText(
+          [
+            { text: `${part.count} `, options: { bold: true, color: C.ink } },
+            { text: `${part.label} (${part.pct}%)`, options: { color: C.muted } },
+          ],
+          { x: x + 0.24, y: 4.47, w: 2.7, h: 0.34, fontSize: 11, valign: "middle" },
+        );
       });
     }
 
@@ -196,24 +356,20 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
         const values = m.courses.map((c) => c.count);
         const chartType =
           model.config.enrolmentChart === "bar" ? pptx.ChartType.bar : pptx.ChartType.doughnut;
-        slide.addChart(
-          chartType,
-          [{ name: "Enrolments", labels, values }],
-          {
-            ...chartBase,
-            x: 0.5,
-            y: 1.5,
-            w: 4.4,
-            h: 3.7,
-            chartColors: SERIES.slice(0, Math.max(labels.length, 1)),
-            showLegend: false,
-            showValue: false,
-            holeSize: 55,
-            barDir: "bar",
-            catAxisHidden: model.config.enrolmentChart !== "bar",
-            valAxisHidden: true,
-          } as PptxGenJS.IChartOpts,
-        );
+        slide.addChart(chartType, [{ name: "Enrolments", labels, values }], {
+          ...chartBase,
+          x: 0.5,
+          y: 1.5,
+          w: 4.4,
+          h: 3.7,
+          chartColors: SERIES.slice(0, Math.max(labels.length, 1)),
+          showLegend: false,
+          showValue: false,
+          holeSize: 55,
+          barDir: "bar",
+          catAxisHidden: model.config.enrolmentChart !== "bar",
+          valAxisHidden: true,
+        } as PptxGenJS.IChartOpts);
 
         const rows: PptxGenJS.TableRow[] = m.courses.slice(0, 7).map((c, i) => [
           { text: "■", options: { fontSize: 11, color: seriesColor(i) } },
@@ -221,7 +377,10 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
             text: c.course,
             options: { fontSize: 11, color: C.muted },
           },
-          { text: String(c.count), options: { fontSize: 11, align: "right" as const, color: C.muted } },
+          {
+            text: String(c.count),
+            options: { fontSize: 11, align: "right" as const, color: C.muted },
+          },
           {
             text: `${c.pct}%`,
             options: {
@@ -252,192 +411,316 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
       }
     }
 
-    if (section === "completion") {
-      const pages = completionPages(m);
-      const cell = (text: string, opts: PptxGenJS.TableCellProps = {}): PptxGenJS.TableCell => ({
-        text,
-        options: { fontSize: 10, color: C.muted, ...opts },
-      });
-      const userTable = (
-        users: CompletionUser[],
-        total: number,
-        start: number,
-      ): PptxGenJS.TableRow[] => {
-        const head: PptxGenJS.TableRow = [
-          cell("#", { bold: true, color: C.ink }),
-          cell("Participant", { bold: true, color: C.ink }),
-          cell("Course", { bold: true, color: C.ink }),
-        ];
-        if (users.length === 0 && total === 0) {
-          return [head, [cell(""), cell("0", { color: C.ink }), cell("")]];
-        }
-        return [
-          head,
-          ...users.map((user, i) => [
-            cell(String(start + i + 1)),
-            cell(user.participant, { color: C.ink }),
-            cell(user.course),
-          ]),
-        ];
-      };
-
-      pages.forEach((page, pageIndex) => {
-        const target = pageIndex === 0 ? slide : pptx.addSlide();
-        if (pageIndex > 0) target.background = bg;
-        const continued = page.total > 1 ? ` · page ${page.index + 1} of ${page.total}` : "";
+    if (section === "courses") {
+      const pages = coursePages(m);
+      if (pages.length === 0) pages.push([]);
+      pages.forEach((rows, pageIndex) => {
+        const target = pageIndex === 0 ? slide : continuationSlide();
         heading(
           target,
           C,
-          "Completed and not completed",
-          `${m.completed} completed · ${m.notCompleted} not completed${continued}`,
+          "Course Breakdown",
+          `Status of ${m.totalEnrolments} course assignments across ${m.courseCount} ${
+            m.courseCount === 1 ? "course" : "courses"
+          }${pageSuffix(pageIndex, pages.length)}`,
         );
         addLogo(target, model);
 
-        let listTop = 1.45;
-        if (page.showChart) {
-          const slices = m.completionSplit
-            .map((item, i) => ({ ...item, color: seriesColor(i) }))
-            .filter((item) => item.count > 0);
-          if (slices.length > 0) {
-            target.addChart(
-              pptx.ChartType.doughnut,
-              [
-                {
-                  name: "Completion",
-                  labels: slices.map((item) => item.label),
-                  values: slices.map((item) => item.count),
-                },
-              ],
-              {
-                ...chartBase,
-                x: 0.35,
-                y: 1.35,
-                w: 4.3,
-                h: 2.15,
-                holeSize: 62,
-                showLegend: false,
-                showValue: false,
-                showPercent: false,
-                chartColors: slices.map((item) => item.color),
-              } as PptxGenJS.IChartOpts,
-            );
-          } else {
-            target.addText("0", {
-              x: 0.35,
-              y: 1.9,
-              w: 4.3,
-              h: 0.8,
-              fontSize: 32,
+        const num = (value: number, row: number, key?: StatusKey): PptxGenJS.TableCell =>
+          bodyCell(String(value), row, {
+            align: "center",
+            bold: key != null && value > 0,
+            color: key != null && value > 0 ? S[key] : C.muted,
+          });
+        const table: PptxGenJS.TableRow[] = [
+          [
+            headCell("Course"),
+            headCell("Assigned", "center"),
+            headCell("Completed", "center"),
+            headCell("In progress", "center"),
+            headCell("Not completed", "center"),
+            headCell("Completion rate", "center"),
+            headCell("Avg score", "center"),
+          ],
+          ...rows.map((c, i) => [
+            bodyCell(c.course, i, { bold: true, color: C.ink }),
+            num(c.count, i),
+            num(c.completed, i, "completed"),
+            num(c.inProgress, i, "inProgress"),
+            num(c.notCompleted, i, "notCompleted"),
+            bodyCell(`${c.completionRate}%`, i, { align: "center", bold: true, color: C.ink }),
+            bodyCell(formatScore(c.avgScore), i, { align: "center" }),
+          ]),
+        ];
+        if (pageIndex === pages.length - 1 && m.courses.length > 0) {
+          const total = (
+            text: string,
+            align: "left" | "center" = "center",
+          ): PptxGenJS.TableCell => ({
+            text,
+            options: {
+              fontSize: 9,
               bold: true,
-              align: "center",
               color: C.ink,
-              fontFace: "Georgia",
-            });
-          }
-          m.completionSplit.forEach((item, i) => {
-            const y = 1.55 + i * 0.85;
-            target.addShape("roundRect", {
-              x: 4.7,
-              y,
-              w: 4.8,
-              h: 0.72,
               fill: { color: C.card },
-              line: { color: C.card },
-              rectRadius: 0.08,
-            });
-            target.addShape("roundRect", {
-              x: 4.9,
-              y: y + 0.24,
-              w: 0.24,
-              h: 0.24,
-              fill: { color: seriesColor(i) },
-              line: { color: seriesColor(i) },
-              rectRadius: 0.04,
-            });
-            target.addText(item.label, {
-              x: 5.3,
-              y,
-              w: 2.2,
-              h: 0.72,
-              fontSize: 13,
-              color: C.ink,
+              align,
               valign: "middle",
-            });
-            target.addText(String(item.count), {
-              x: 7.4,
-              y,
-              w: 0.9,
-              h: 0.72,
-              fontSize: 18,
-              bold: true,
-              align: "right",
-              color: C.ink,
-              fontFace: "Georgia",
-              valign: "middle",
-            });
-            target.addText(`${item.pct}%`, {
-              x: 8.35,
-              y,
-              w: 0.95,
-              h: 0.72,
-              fontSize: 12,
-              align: "right",
-              color: C.muted,
-              valign: "middle",
-            });
+            },
           });
-          listTop = 3.7;
+          table.push([
+            total("Total", "left"),
+            total(String(m.totalEnrolments)),
+            total(String(m.completed)),
+            total(String(m.inProgress)),
+            total(String(m.notCompleted)),
+            total(`${m.completionRate}%`),
+            total(formatScore(m.average)),
+          ]);
         }
+        target.addTable(table, {
+          x: 0.5,
+          y: 1.45,
+          w: 9,
+          colW: [2.7, 0.9, 1.0, 1.0, 1.15, 1.2, 1.05],
+          rowH: 0.27,
+          border: tableBorder,
+          fontFace: "Calibri",
+        });
 
-        const groups = [
-          page.completed.length > 0 || (m.completed === 0 && page.showChart)
-            ? {
-                title: "Completed users",
-                total: m.completed,
-                rows: page.completed,
-                start: page.completedStart,
-              }
-            : null,
-          page.notCompleted.length > 0 || (m.notCompleted === 0 && page.showChart && m.completed === 0)
-            ? {
-                title: "Not completed users",
-                total: m.notCompleted,
-                rows: page.notCompleted,
-                start: page.notCompletedStart,
-              }
-            : null,
-        ].filter((group) => group != null);
-        const wide = groups.length < 2;
-        groups.forEach((group, i) => {
-          const x = wide ? 0.5 : 0.45 + i * 4.75;
-          const w = wide ? 9.1 : 4.5;
-          target.addText(`${group.title}  ·  ${group.total}`, {
-            x,
-            y: listTop,
-            w,
-            h: 0.28,
-            fontSize: 12,
-            bold: true,
-            color: C.ink,
-          });
-          const body = userTable(group.rows, group.total, group.start);
-          if (body.length === 0) return;
-          target.addTable(body, {
-            x,
-            y: listTop + 0.3,
-            w,
-            colW: wide ? [0.7, 4.2, 4.2] : [0.45, 2.05, 2],
-            border: [
-              { pt: 0, color: C.bg },
-              { pt: 0, color: C.bg },
-              { pt: 0.5, color: C.card },
-              { pt: 0, color: C.bg },
-            ],
-            fontFace: "Calibri",
-            valign: "middle",
-          });
+        if (rows.length > 0) {
+          target.addChart(
+            pptx.ChartType.bar,
+            STATUS_ORDER.map((key) => ({
+              name: STATUS_LABELS[key],
+              labels: rows.map((c) => c.course),
+              values: rows.map((c) => c[key]),
+            })),
+            {
+              x: 0.5,
+              y: 3.42,
+              w: 9,
+              h: 1.82,
+              barDir: "bar",
+              barGrouping: "stacked",
+              barOverlapPct: 100,
+              barGapWidthPct: 55,
+              chartColors: [S.completed, S.inProgress, S.notCompleted],
+              showLegend: true,
+              legendPos: "b",
+              legendFontSize: 9,
+              legendColor: C.muted,
+              showValue: true,
+              dataLabelColor: C.white,
+              dataLabelFontSize: 9,
+              dataLabelFormatCode: "0;-0;;",
+              catAxisOrientation: "maxMin",
+              catAxisLabelColor: C.muted,
+              catAxisLabelFontSize: 9,
+              catAxisLineShow: false,
+              catGridLine: { style: "none" },
+              valGridLine: { style: "none" },
+              valAxisHidden: true,
+              valAxisLineShow: false,
+            } as unknown as PptxGenJS.IChartOpts,
+          );
+        }
+      });
+    }
+
+    if (section === "completion") {
+      heading(
+        slide,
+        C,
+        "Training Status Overview",
+        `${m.completed} completed  ·  ${m.inProgress} in progress  ·  ${m.notCompleted} not completed`,
+      );
+      addLogo(slide, model);
+      const slices = m.completionSplit.filter((item) => item.count > 0);
+      if (slices.length > 0) {
+        slide.addChart(
+          pptx.ChartType.doughnut,
+          [
+            {
+              name: "Status",
+              labels: slices.map((item) => item.label),
+              values: slices.map((item) => item.count),
+            },
+          ],
+          {
+            x: 0.5,
+            y: 1.45,
+            w: 4.1,
+            h: 3.7,
+            holeSize: 60,
+            showLegend: false,
+            showValue: false,
+            showPercent: true,
+            dataLabelColor: C.white,
+            dataLabelFontSize: 11,
+            dataLabelFontBold: true,
+            chartColors: slices.map((item) => S[item.key]),
+            dataBorder: { pt: 1.5, color: C.bg },
+          } as PptxGenJS.IChartOpts,
+        );
+      } else {
+        slide.addText("No assignments", {
+          x: 0.5,
+          y: 2.9,
+          w: 4.1,
+          h: 0.6,
+          fontSize: 16,
+          align: "center",
+          color: C.muted,
+        });
+      }
+      m.statusGroups.forEach((group, i) => {
+        const y = 1.6 + i * 1.18;
+        slide.addShape("roundRect", {
+          x: 4.9,
+          y,
+          w: 4.6,
+          h: 1.02,
+          fill: { color: soft(group.key) },
+          line: { color: soft(group.key) },
+          rectRadius: 0.08,
+        });
+        slide.addShape("rect", {
+          x: 4.9,
+          y: y + 0.14,
+          w: 0.07,
+          h: 0.74,
+          fill: { color: S[group.key] },
+          line: { color: S[group.key] },
+        });
+        slide.addText(group.label, {
+          x: 5.15,
+          y: y + 0.14,
+          w: 2.4,
+          h: 0.38,
+          fontSize: 14,
+          bold: true,
+          color: C.ink,
+          fontFace: "Georgia",
+          valign: "middle",
+        });
+        slide.addText(
+          `${group.users.length} ${group.users.length === 1 ? "employee" : "employees"}  ·  ${group.pct}% of assignments`,
+          { x: 5.15, y: y + 0.52, w: 2.9, h: 0.3, fontSize: 9.5, color: C.muted, valign: "middle" },
+        );
+        slide.addText(String(group.assignments), {
+          x: 8.0,
+          y: y + 0.11,
+          w: 1.3,
+          h: 0.8,
+          fontSize: 30,
+          bold: true,
+          align: "right",
+          valign: "middle",
+          color: S[group.key],
+          fontFace: "Georgia",
         });
       });
+
+      const ROW = 0.27;
+      for (const page of statusPages(m)) {
+        const target = continuationSlide();
+        heading(
+          target,
+          C,
+          "Training Status Details",
+          `Each employee is listed once per status, with their courses grouped on one row${pageSuffix(page.index, page.total)}`,
+        );
+        addLogo(target, model);
+        let y = 1.42;
+        for (const block of page.blocks) {
+          const { group } = block;
+          const withScore = group.key === "completed";
+          target.addShape("roundRect", {
+            x: 0.5,
+            y,
+            w: 2.4,
+            h: 0.3,
+            fill: { color: soft(group.key) },
+            line: { color: soft(group.key) },
+            rectRadius: 0.04,
+          });
+          target.addShape("rect", {
+            x: 0.5,
+            y,
+            w: 0.06,
+            h: 0.3,
+            fill: { color: S[group.key] },
+            line: { color: S[group.key] },
+          });
+          target.addText(`${group.label}${block.continued ? " (continued)" : ""}`, {
+            x: 0.65,
+            y,
+            w: 2.25,
+            h: 0.3,
+            fontSize: 11.5,
+            bold: true,
+            color: C.ink,
+            valign: "middle",
+          });
+          target.addText(
+            `${group.assignments} course ${group.assignments === 1 ? "assignment" : "assignments"}  |  ${group.users.length} ${group.users.length === 1 ? "employee" : "employees"}`,
+            { x: 3.05, y, w: 5, h: 0.3, fontSize: 9.5, color: C.muted, valign: "middle" },
+          );
+
+          const head: PptxGenJS.TableRow = [
+            headCell("#", "center"),
+            headCell("Employee"),
+            headCell(withScore ? "Course(s) completed" : "Course(s) in this status"),
+            ...(withScore ? [headCell("Score", "center")] : []),
+          ];
+          const heights = [ROW];
+          const body: PptxGenJS.TableRow[] = [];
+          if (block.rows.length === 0) {
+            body.push([
+              bodyCell("", 0),
+              {
+                text: "No course assignments in this status",
+                options: {
+                  fontSize: 9,
+                  italic: true,
+                  color: C.muted,
+                  colspan: withScore ? 3 : 2,
+                  valign: "middle",
+                },
+              },
+            ]);
+            heights.push(ROW);
+          }
+          block.rows.forEach((user, i) => {
+            const text = coursesText(user);
+            body.push([
+              bodyCell(String(block.start + i + 1), i, { align: "center" }),
+              bodyCell(user.participant, i, { bold: true, color: C.ink }),
+              bodyCell(text, i),
+              ...(withScore
+                ? [
+                    bodyCell(scoresText(user), i, {
+                      align: "center",
+                      bold: true,
+                      color: S.completed,
+                    }),
+                  ]
+                : []),
+            ]);
+            heights.push(ROW * rowUnits(user));
+          });
+          target.addTable([head, ...body], {
+            x: 0.5,
+            y: y + 0.36,
+            w: 9,
+            colW: withScore ? [0.45, 2.3, 4.85, 1.4] : [0.45, 2.3, 6.25],
+            rowH: heights,
+            border: tableBorder,
+            fontFace: "Calibri",
+          });
+          y += 0.36 + heights.reduce((a, b) => a + b, 0) + 0.16;
+        }
+      }
     }
 
     if (section === "trends") {
@@ -454,7 +737,13 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
 
       if (m.byMonth.length > 0) {
         slide.addText("Enrolments over time", {
-          x: 0.5, y: 1.45, w: 4.3, h: 0.3, fontSize: 11, bold: true, color: C.ink,
+          x: 0.5,
+          y: 1.45,
+          w: 4.3,
+          h: 0.3,
+          fontSize: 11,
+          bold: true,
+          color: C.ink,
         });
         slide.addChart(
           pptx.ChartType.line,
@@ -467,7 +756,10 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
           ],
           {
             ...chartBase,
-            x: 0.4, y: 1.8, w: 4.5, h: 3.2,
+            x: 0.4,
+            y: 1.8,
+            w: 4.5,
+            h: 3.2,
             chartColors: [C.accent],
             showLegend: false,
             showValue: true,
@@ -481,7 +773,13 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
 
       if (m.byDepartment.length > 0) {
         slide.addText("Enrolments by department", {
-          x: 5.2, y: 1.45, w: 4.3, h: 0.3, fontSize: 11, bold: true, color: C.ink,
+          x: 5.2,
+          y: 1.45,
+          w: 4.3,
+          h: 0.3,
+          fontSize: 11,
+          bold: true,
+          color: C.ink,
         });
         const dept = m.byDepartment.slice(0, 6);
         slide.addChart(
@@ -495,7 +793,10 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
           ],
           {
             ...chartBase,
-            x: 5.1, y: 1.8, w: 4.5, h: 3.2,
+            x: 5.1,
+            y: 1.8,
+            w: 4.5,
+            h: 3.2,
             chartColors: SERIES.slice(0, dept.length),
             barDir: "bar",
             showLegend: false,
@@ -576,9 +877,9 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
       addLogo(slide, model);
 
       const stats: [string, string][] = [
-        [m.highest == null ? "—" : `${m.highest}%`, "Highest score"],
-        [m.lowest == null ? "—" : `${m.lowest}%`, "Lowest score"],
-        [m.average == null ? "—" : `${m.average}%`, "Average score"],
+        [formatScore(m.highest), "Highest score"],
+        [formatScore(m.lowest), "Lowest score"],
+        [formatScore(m.average), "Average score"],
         [`${m.passRate}%`, "Pass rate"],
         [String(m.assessed), "Assessed"],
         [`${m.passed} / ${m.failed}`, "Passed / below"],
@@ -646,94 +947,69 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
       const low = m.lowPerformers[0];
       if (low) {
         slide.addText(
-          `Note: lowest result is ${low.participant} at ${low.score}% in ${low.course} — flagged for a short refresher.`,
+          `Note: lowest result is ${low.participant} at ${formatScore(low.score)} in ${low.course} — flagged for a short refresher.`,
           { x: 5.1, y: 4.6, w: 4.4, h: 0.6, fontSize: 9.5, italic: true, color: C.muted },
         );
       }
     }
 
     if (section === "participants") {
-      heading(
-        slide,
-        C,
-        "Participant Results",
-        `${m.uniqueParticipants} people · every name, course load and score from the imported data`,
-      );
-      addLogo(slide, model);
-
-      const head: PptxGenJS.TableRow = [
-        "Participant",
-        "Courses",
-        "Avg",
-        "Best",
-        "Passed",
-      ].map((t, i) => ({
-        text: t,
-        options: {
-          fontSize: 9,
-          bold: true,
-          color: C.ink,
-          align: (i === 0 ? "left" : "right") as "left" | "right",
-        },
-      }));
-      const body: PptxGenJS.TableRow[] = m.participants.slice(0, 12).map((p) => [
-        { text: p.participant, options: { fontSize: 10, color: C.muted } },
-        { text: String(p.enrolments), options: { fontSize: 10, align: "right" as const, color: C.muted } },
-        {
-          text: p.avgScore == null ? "—" : `${p.avgScore}%`,
-          options: { fontSize: 10, bold: true, align: "right" as const, color: C.ink },
-        },
-        {
-          text: p.bestScore == null ? "—" : `${p.bestScore}%`,
-          options: { fontSize: 10, align: "right" as const, color: C.muted },
-        },
-        {
-          text: `${p.passed}/${p.enrolments}`,
-          options: { fontSize: 10, align: "right" as const, color: C.muted },
-        },
-      ]);
-      slide.addTable([head, ...body], {
-        x: 0.5,
-        y: 1.55,
-        w: 5.3,
-        colW: [2.2, 0.85, 0.75, 0.75, 0.75],
-        border: { type: "solid", pt: 1, color: C.card },
-        rowH: 0.26,
-      });
-
-      const scored = m.participants.filter((p) => p.avgScore != null).slice(0, 8);
-      if (scored.length > 0) {
-        slide.addText("Average score by participant", {
-          x: 6.0, y: 1.5, w: 3.5, h: 0.3, fontSize: 11, bold: true, color: C.ink,
-        });
-        slide.addChart(
-          pptx.ChartType.bar,
+      const pages = participantPages(m);
+      if (pages.length === 0) pages.push([]);
+      let offset = 0;
+      pages.forEach((rows, pageIndex) => {
+        const target = pageIndex === 0 ? slide : continuationSlide();
+        heading(
+          target,
+          C,
+          "Employee Training Overview",
+          `${m.uniqueParticipants} ${m.uniqueParticipants === 1 ? "employee" : "employees"}, each shown once with all assigned courses${pageSuffix(pageIndex, pages.length)}`,
+        );
+        addLogo(target, model);
+        const num = (value: number, row: number, key?: StatusKey): PptxGenJS.TableCell =>
+          bodyCell(String(value), row, {
+            align: "center",
+            bold: key != null && value > 0,
+            color: key != null && value > 0 ? S[key] : C.muted,
+          });
+        const start = offset;
+        target.addTable(
           [
-            {
-              name: "Average score",
-              labels: scored.map((p) => p.participant),
-              values: scored.map((p) => p.avgScore ?? 0),
-            },
+            [
+              headCell("#", "center"),
+              headCell("Employee"),
+              headCell("Assigned", "center"),
+              headCell("Completed", "center"),
+              headCell("In progress", "center"),
+              headCell("Not completed", "center"),
+              headCell("Completion", "center"),
+              headCell("Avg score", "center"),
+            ],
+            ...rows.map((p, i) => [
+              bodyCell(String(start + i + 1), i, { align: "center" }),
+              bodyCell(p.participant, i, { bold: true, color: C.ink }),
+              num(p.enrolments, i),
+              num(p.completed, i, "completed"),
+              num(p.inProgress, i, "inProgress"),
+              num(p.notCompleted, i, "notCompleted"),
+              bodyCell(`${Math.round((p.completed / Math.max(p.enrolments, 1)) * 100)}%`, i, {
+                align: "center",
+              }),
+              bodyCell(formatScore(p.avgScore), i, { align: "center", bold: true, color: C.ink }),
+            ]),
           ],
           {
-            ...chartBase,
-            x: 5.9, y: 1.85, w: 3.7, h: 3.2,
-            valAxisMaxVal: 115,
-            chartColors: SERIES.slice(0, scored.length),
-            barDir: "bar",
-            showLegend: false,
-            showValue: true,
-            valAxisHidden: true,
-            catAxisLabelColor: C.muted,
-            varyColors: true,
-          } as PptxGenJS.IChartOpts,
+            x: 0.5,
+            y: 1.45,
+            w: 9,
+            colW: [0.45, 2.75, 0.95, 1.05, 1.05, 1.2, 0.8, 0.75],
+            rowH: 0.29,
+            border: tableBorder,
+            fontFace: "Calibri",
+          },
         );
-      }
-      if (m.participants.length > 12) {
-        slide.addText(`+ ${m.participants.length - 12} more participants in the source data`, {
-          x: 0.5, y: 4.9, w: 5.3, h: 0.3, fontSize: 9, italic: true, color: C.muted,
-        });
-      }
+        offset += rows.length;
+      });
     }
 
     if (section === "recommendations") {
@@ -803,6 +1079,11 @@ export async function exportPptx(model: ReportModel, fileName: string): Promise<
     }
   }
 
+  return pptx;
+}
+
+export async function exportPptx(model: ReportModel, fileName: string): Promise<void> {
+  const pptx = buildPptx(model);
   await pptx.writeFile({ fileName: fileName.endsWith(".pptx") ? fileName : `${fileName}.pptx` });
 }
 

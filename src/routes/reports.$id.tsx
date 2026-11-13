@@ -123,9 +123,19 @@ function ReportWorkspace() {
   ) => {
     commit(next);
     if (report) store.updateReport(report.id, { mapping, sourceFileName: fileName });
-    setTab("data");
-    toast.success(`${next.length} records ready to review`);
+    setTab("report");
+    toast.success(`${next.length} records imported — your report is ready`, {
+      action: { label: "Download PowerPoint", onClick: () => setDownloadRequested(true) },
+    });
   };
+
+  const [downloadRequested, setDownloadRequested] = useState(false);
+  useEffect(() => {
+    if (!downloadRequested || records.length === 0) return;
+    setDownloadRequested(false);
+    void downloadPptx();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downloadRequested, model]);
 
   const downloadPptx = async () => {
     try {

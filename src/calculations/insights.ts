@@ -1,9 +1,10 @@
-import type { Metrics } from "./metrics";
+import type { Metrics, StatusKey } from "./metrics";
 
 export interface KpiCard {
   value: string;
+  label: string;
   caption: string;
-  tone: "primary" | "accent";
+  tone: "neutral" | StatusKey;
 }
 
 export interface InsightBlock {
@@ -20,53 +21,22 @@ export interface Recommendation {
 
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-/** Four headline KPIs, each derived from a metric. */
+/** Four headline KPIs: total assignments and the three status counts. */
 export function buildKpis(m: Metrics): KpiCard[] {
-  const cards: KpiCard[] = [];
-  const top = m.courses[0];
-  const second = m.courses[1];
-
-  if (top) {
-    const share = second ? top.pct + second.pct : top.pct;
-    const label = second ? `${top.course} and ${second.course}` : top.course;
-    cards.push({
-      value: `${fmt(share)}%`,
-      caption: `of enrolments are in ${label}`,
-      tone: "accent",
-    });
-  }
-
-  cards.push({
-    value: String(m.uniqueParticipants),
-    caption: `employees enrolled across ${m.courseCount} ${m.courseCount === 1 ? "course" : "courses"}`,
-    tone: "primary",
-  });
-
-  if (m.assessed > 0) {
-    cards.push({
-      value: `${fmt(m.passRate)}%`,
-      caption: `pass rate — ${m.passed} of ${m.assessed} assessments at or above ${m.passMark}%`,
-      tone: "accent",
-    });
-    cards.push({
-      value: `${m.perfectScores} / ${m.assessed}`,
-      caption: "assessments achieved a perfect 100%",
-      tone: "primary",
-    });
-  } else {
-    cards.push({
-      value: `${fmt(m.completionRate)}%`,
-      caption: `completion rate — ${m.completed} of ${m.totalEnrolments} enrolments completed`,
-      tone: "accent",
-    });
-    cards.push({
+  return [
+    {
       value: String(m.totalEnrolments),
-      caption: "total enrolments recorded in this period",
-      tone: "primary",
-    });
-  }
-
-  return cards.slice(0, 4);
+      label: "Total course assignments",
+      caption: `${m.uniqueParticipants} ${m.uniqueParticipants === 1 ? "employee" : "employees"} · ${m.courseCount} ${m.courseCount === 1 ? "course" : "courses"}`,
+      tone: "neutral",
+    },
+    ...m.completionSplit.map((s) => ({
+      value: String(s.count),
+      label: s.label,
+      caption: `${fmt(s.pct)}% of assignments`,
+      tone: s.key,
+    })),
+  ];
 }
 
 /** One-line narrative shown beneath the enrolment chart. */
@@ -138,11 +108,20 @@ export function buildRecommendations(m: Metrics): Recommendation[] {
   if (top) {
     const share = second ? top.pct + second.pct : top.pct;
     if (share >= 50) {
-      out.push({
-        icon: "check",
-        title: "Core training is well embedded",
-        body: `${fmt(share)}% of enrolments sit in ${second ? `${top.course} and ${second.course}` : top.course}. Continue this sequencing so fundamentals are covered before specialist progression.`,
-      });
+      const names = second ? `${top.course} and ${second.course}` : top.course;
+      out.push(
+        m.completionRate >= 50
+          ? {
+              icon: "check",
+              title: "Core training is well embedded",
+              body: `${fmt(share)}% of assignments sit in ${names}, and ${fmt(m.completionRate)}% of all assignments are complete. Continue this sequencing so fundamentals are covered before specialist progression.`,
+            }
+          : {
+              icon: "check",
+              title: "Prioritise the core courses",
+              body: `${fmt(share)}% of assignments sit in ${names}. Completing these first closes the largest share of outstanding training.`,
+            },
+      );
     } else {
       out.push({
         icon: "check",
@@ -157,7 +136,7 @@ export function buildRecommendations(m: Metrics): Recommendation[] {
       out.push({
         icon: "up",
         title: "Assessment outcomes are strong",
-        body: `A ${fmt(m.passRate)}% pass rate and ${m.perfectScores} perfect ${m.perfectScores === 1 ? "score" : "scores"} out of ${m.assessed} assessments indicate content is well designed and clearly delivered. No structural changes recommended.`,
+        body: `A ${fmt(m.passRate)}% pass rate and ${m.perfectScores} perfect ${m.perfectScores === 1 ? "score" : "scores"} out of ${m.assessed} assessments indicate content is well designed and clearly delivered${m.assessed < m.totalEnrolments ? `, though only ${m.assessed} of ${m.totalEnrolments} assignments have been assessed so far` : ""}.`,
       });
     } else if (m.passRate >= 75) {
       out.push({
@@ -191,7 +170,7 @@ export function buildRecommendations(m: Metrics): Recommendation[] {
     out.push({
       icon: "clock",
       title: "Chase outstanding completions",
-      body: `${incomplete} of ${m.totalEnrolments} enrolments (${fmt(100 - m.completionRate)}%) are not yet recorded as complete. Follow up before the grace period closes.`,
+      body: `${incomplete} of ${m.totalEnrolments} assignments (${fmt(100 - m.completionRate)}%) are not yet complete: ${m.inProgress} in progress and ${m.notCompleted} not completed. Follow up with the relevant managers before the grace period closes.`,
     });
   } else if (m.totalEnrolments > 0) {
     out.push({

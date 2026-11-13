@@ -28,6 +28,7 @@ const ORDER: SectionKey[] = [
   "cover",
   "summary",
   "enrolment",
+  "courses",
   "completion",
   "trends",
   "insights",
@@ -64,7 +65,12 @@ export function buildReportModel(
     narrative: config.narrativeOverride?.trim() || buildNarrative(metrics),
     insights: buildInsights(metrics),
     recommendations,
-    visibleSections: ORDER.filter((s) => config.sections[s] !== false),
+    // A trend needs more than one month or department to say anything.
+    visibleSections: ORDER.filter(
+      (s) =>
+        config.sections[s] !== false &&
+        (s !== "trends" || metrics.byMonth.length > 1 || metrics.byDepartment.length > 1),
+    ),
     palette: paletteFor(config.theme),
   };
 }

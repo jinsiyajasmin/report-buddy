@@ -164,7 +164,12 @@ export function UploadStep({
               <ul className="space-y-1.5 text-sm">
                 <Line ok>{parsed.rows.length} records imported</Line>
                 <Line ok>{metrics.completed} completed</Line>
+                <Line ok>{metrics.inProgress} in progress</Line>
                 <Line ok>{metrics.notCompleted} not completed</Line>
+                <Line ok>{metrics.uniqueParticipants} people (each listed once)</Line>
+                {metrics.duplicatesRemoved > 0 ? (
+                  <Line ok>{metrics.duplicatesRemoved} duplicate rows merged</Line>
+                ) : null}
                 <Line ok>{parsed.headers.length} columns detected</Line>
                 <Line ok={metrics.courseCount > 0}>
                   {metrics.courseCount} training {metrics.courseCount === 1 ? "course" : "courses"}{" "}
